@@ -945,8 +945,6 @@
 							$aFinalPhrase['wordsets'] = getInverseWordSets($aFinalPhrase['words'], 0);
 						}
 						$aReverseGroupedSearches = $this->getGroupedSearches($aSearches, $aPhrases, $aValidTokens, $aWordFrequencyScores, false);
-						echo "<b>Reverse Grouped Searches</b>";
-						_debugDumpGroupedSearches($aReverseGroupedSearches, $aValidTokens);
 
 						foreach($aGroupedSearches as $aSearches)
 						{
