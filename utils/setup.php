@@ -216,9 +216,8 @@
 	{
 		echo "Functions\n";
 		$bDidSomething = true;
-		if (!file_exists(CONST_BasePath.'/module/nominatim.so')) fail("nominatim module not built");
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/functions.sql');
-		$sTemplate = str_replace('{modulepath}', CONST_BasePath.'/module', $sTemplate);
+		$sTemplate = str_replace('{modulepath}', CONST_SitePath.'/modules/transliterate', $sTemplate);
 		if ($aCMDResult['enable-diff-updates']) $sTemplate = str_replace('RETURN NEW; -- @DIFFUPDATES@', '--', $sTemplate);
 		if ($aCMDResult['enable-debug-statements']) $sTemplate = str_replace('--DEBUG:', '', $sTemplate);
 		if (CONST_Limit_Reindexing) $sTemplate = str_replace('--LIMIT INDEXING:', '', $sTemplate);
@@ -289,7 +288,7 @@
 		echo "Functions\n";
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/functions.sql');
 		$sTemplate = str_replace('{modulepath}',
-			                     CONST_BasePath.'/module', $sTemplate);
+			                     CONST_SitePath.'/modules/transliterate', $sTemplate);
 		pgsqlRunScript($sTemplate);
 	}
 

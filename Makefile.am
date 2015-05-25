@@ -1,7 +1,7 @@
 ACLOCAL_AMFLAGS = -I osm2pgsql/m4
 AUTOMAKE_OPTIONS = -Wno-portability
 
-SUBDIRS = osm2pgsql module nominatim
+SUBDIRS = osm2pgsql modules/transliterate/plain nominatim
 
 NOMINATIM_SERVER ?= $(shell echo a | php -F lib/init.php -E 'echo CONST_Website_BaseURL."\n";')
 
@@ -17,4 +17,11 @@ test-db:
 test-api:
 	cd tests; NOMINATIM_SERVER=${NOMINATIM_SERVER} lettuce -t -Fail -t -poldi-only features/api
 
-.PHONY: test test-db test-api
+site-install: SITE ?= site
+
+site-install:
+	$(if $(M),,$(error No module to install given (with option M=...)))
+	@make -C $(M) SITE=$(abspath $(SITE)) site-install
+
+
+.PHONY: test test-db test-api site-install

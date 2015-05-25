@@ -1,0 +1,20 @@
+MODULES = nominatim
+PGXS := @POSTGRESQL_PGXS@
+PG_CONFIG := @PG_CONFIG@
+include $(PGXS)
+
+all:
+	chmod 755 nominatim.so
+
+install:
+	@echo Library does not need to be installed.
+
+site-install: SITE_MODDIR = $(SITE)/modules/transliterate
+
+site-install:
+	$(if $(SITE),,$(error No Nominatim site directory given (with option SITE=...)))
+	@echo Installing to '$(SITE_MODDIR)'.
+	@install -d '$(SITE_MODDIR)'
+	@rm -f "$(SITE_MODDIR)/*"
+	install -t $(SITE_MODDIR) nominatim.so
+

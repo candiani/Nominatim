@@ -62,4 +62,4 @@ AM_PATH_XML2
 
 AC_CONFIG_SUBDIRS([osm2pgsql])
 
-AC_OUTPUT(Makefile nominatim/Makefile module/Makefile)
+AC_OUTPUT(Makefile nominatim/Makefile modules/transliterate/plain/Makefile)
