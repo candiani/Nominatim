@@ -66,9 +66,6 @@
 	}
 */
 
-	// Assume osm2pgsql is in the folder above
-	$sBasePath = dirname(dirname(__FILE__));
-
 	date_default_timezone_set('Etc/UTC');
 
 	$oDB =& getDB();
@@ -197,7 +194,7 @@
 	if ($bModifyXML)
 	{
 		// derive change from normal osm file with osmosis
-		$sTemporaryFile = CONST_BasePath.'/data/osmosischange.osc';
+		$sTemporaryFile = CONST_SitePath.'/data/osmosischange.osc';
 		if (isset($aResult['import-file']) && $aResult['import-file'])
 		{
 			$sCMD = CONST_Osmosis_Binary.' --read-xml \''.$aResult['import-file'].'\' --read-empty --derive-change --write-xml-change '.$sTemporaryFile;
@@ -368,13 +365,13 @@
 			exit;
 		}
 
-		$sImportFile = CONST_BasePath.'/data/osmosischange.osc';
+		$sImportFile = CONST_SitePath.'/data/osmosischange.osc';
 		$sOsmosisCMD = CONST_Osmosis_Binary;
-		$sOsmosisConfigDirectory = CONST_BasePath.'/settings';
+		$sOsmosisConfigDirectory = CONST_SitePath;
 		$sCMDDownload = $sOsmosisCMD.' --read-replication-interval workingDirectory='.$sOsmosisConfigDirectory.' --simplify-change --write-xml-change '.$sImportFile;
 		$sCMDCheckReplicationLag = $sOsmosisCMD.' -q --read-replication-lag workingDirectory='.$sOsmosisConfigDirectory;
 		$sCMDImport = $sOsm2pgsqlCmd.' '.$sImportFile;
-		$sCMDIndex = $sBasePath.'/nominatim/nominatim -i -d '.$aDSNInfo['database'].' -P '.$aDSNInfo['port'].' -t '.$aResult['index-instances'];
+		$sCMDIndex = CONST_BasePath.'/nominatim/nominatim -i -d '.$aDSNInfo['database'].' -P '.$aDSNInfo['port'].' -t '.$aResult['index-instances'];
 		if (!$aResult['no-npi']) {
 			$sCMDIndex .= '-F ';
 		}
@@ -470,7 +467,7 @@
 					echo $iFileID->getMessage()."\n";
 					exit(-1);
 				} 
-				$sFileDir = CONST_BasePath.'/export/diff/';
+				$sFileDir = CONST_SitePath.'/export/diff/';
 				$sFileDir .= str_pad(floor($iFileID/1000000), 3, '0', STR_PAD_LEFT);
 				$sFileDir .= '/'.str_pad(floor($iFileID/1000) % 1000, 3, '0', STR_PAD_LEFT);
 
@@ -480,7 +477,7 @@
 				$sThisIndexCmd .= ".npi.out";
 
 				preg_match('#^([0-9]{4})-([0-9]{2})-([0-9]{2})#', $sBatchEnd, $aBatchMatch);
-				$sFileDir = CONST_BasePath.'/export/index/';
+				$sFileDir = CONST_SitePath.'/export/index/';
 				$sFileDir .= $aBatchMatch[1].'/'.$aBatchMatch[2];
 
 				if (!is_dir($sFileDir)) mkdir($sFileDir, 0777, true);
@@ -499,7 +496,7 @@
 
 				if (!$aResult['no-npi'])
 				{
-					$sFileDir = CONST_BasePath.'/export/diff/';
+					$sFileDir = CONST_SitePath.'/export/diff/';
 					$sFileDir .= str_pad(floor($iFileID/1000000), 3, '0', STR_PAD_LEFT);
 					$sFileDir .= '/'.str_pad(floor($iFileID/1000) % 1000, 3, '0', STR_PAD_LEFT);
 
@@ -551,15 +548,15 @@
 			var_dump($iNPIID);
 			exit;
 		}
-		$sConfigDirectory = CONST_BasePath.'/settings';
-		$sCMDImportTemplate = $sBasePath.'/nominatim/nominatim -d gazetteer -P 5433 -I -T '.$sBasePath.'/nominatim/partitionedtags.def -F ';
+		$sConfigDirectory = CONST_SitePath;
+		$sCMDImportTemplate = CONST_BasePath.'/nominatim/nominatim -d gazetteer -P 5433 -I -T '.$CONST_BasePath.'/nominatim/partitionedtags.def -F ';
 		while(true)
 		{
 			$fStartTime = time();
 
 			$iNPIID++;
 
-			$sImportFile = CONST_BasePath.'/export/diff/';
+			$sImportFile = CONST_SitePath.'/export/diff/';
 			$sImportFile .= str_pad(floor($iNPIID/1000000), 3, '0', STR_PAD_LEFT);
 			$sImportFile .= '/'.str_pad(floor($iNPIID/1000) % 1000, 3, '0', STR_PAD_LEFT);
 			$sImportFile .= '/'.str_pad($iNPIID % 1000, 3, '0', STR_PAD_LEFT);

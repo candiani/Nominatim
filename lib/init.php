@@ -1,6 +1,7 @@
 <?php
 
 	@define('CONST_BasePath', dirname(dirname(__FILE__)));
+	@define('CONST_SitePath', CONST_BasePath.'/site');
 
 	require_once(CONST_BasePath.'/settings/settings.php');
 	require_once(CONST_BasePath.'/lib/lib.php');

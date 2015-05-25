@@ -182,7 +182,7 @@
 		$osm2pgsql = CONST_Osm2pgsql_Binary;
 		if (!file_exists($osm2pgsql))
 		{
-			echo "Please download and build osm2pgsql.\nIf it is already installed, check the path in your local settings (settings/local.php) file.\n";
+			echo "Please download and build osm2pgsql.\nIf it is already installed, check the path in your local settings (site/settings.php) file.\n";
 			fail("osm2pgsql not found in '$osm2pgsql'");
 		}
 
@@ -562,7 +562,7 @@
 
 		if (!file_exists(CONST_Osmosis_Binary))
 		{
-			echo "Please download osmosis.\nIf it is already installed, check the path in your local settings (settings/local.php) file.\n";
+			echo "Please download osmosis.\nIf it is already installed, check the path in your local settings (site/settings.php) file.\n";
 			if (!$aCMDResult['all'])
 			{
 				fail("osmosis not found in '".CONST_Osmosis_Binary."'");
@@ -570,80 +570,88 @@
 		}
 		else
 		{
-			if (file_exists(CONST_BasePath.'/settings/configuration.txt'))
+			$sOsmosisConf = CONST_SitePath.'/configuration.txt';
+			if (file_exists($sOsmosisConf))
 			{
-				echo "settings/configuration.txt already exists\n";
+				echo "$sOsmosisConf already exists\n";
 			}
 			else
 			{
-				passthru(CONST_Osmosis_Binary.' --read-replication-interval-init '.CONST_BasePath.'/settings');
+				passthru(CONST_Osmosis_Binary.' --read-replication-interval-init '.CONST_SitePath);
 				// update osmosis configuration.txt with our settings
-				passthru("sed -i 's!baseUrl=.*!baseUrl=".CONST_Replication_Url."!' ".CONST_BasePath.'/settings/configuration.txt');
-				passthru("sed -i 's:maxInterval = .*:maxInterval = ".CONST_Replication_MaxInterval.":' ".CONST_BasePath.'/settings/configuration.txt');
+				passthru("sed -i 's!baseUrl=.*!baseUrl=".CONST_Replication_Url."!' ".$sOsmosisConf);
+				passthru("sed -i 's:maxInterval = .*:maxInterval = ".CONST_Replication_MaxInterval.":' ".$sOsmosisConf);
 			}
 
 			// Find the last node in the DB
 			$iLastOSMID = $oDB->getOne("select max(osm_id) from place where osm_type = 'N'");
-
-			// Lookup the timestamp that node was created (less 3 hours for margin for changsets to be closed)
-			$sLastNodeURL = 'http://www.openstreetmap.org/api/0.6/node/'.$iLastOSMID."/1";
-			$sLastNodeXML = file_get_contents($sLastNodeURL);
-			preg_match('#timestamp="(([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z)"#', $sLastNodeXML, $aLastNodeDate);
-			$iLastNodeTimestamp = strtotime($aLastNodeDate[1]) - (3*60*60);
-
-			// Search for the correct state file - uses file timestamps so need to sort by date descending
-			$sRepURL = CONST_Replication_Url."/";
-			$sRep = file_get_contents($sRepURL."?C=M;O=D;F=1");
-			// download.geofabrik.de:    <a href="000/">000/</a></td><td align="right">26-Feb-2013 11:53  </td>
-			// planet.openstreetmap.org: <a href="273/">273/</a>                    2013-03-11 07:41    -
-			preg_match_all('#<a href="[0-9]{3}/">([0-9]{3}/)</a>\s*([-0-9a-zA-Z]+ [0-9]{2}:[0-9]{2})#', $sRep, $aRepMatches, PREG_SET_ORDER);
-			if ($aRepMatches)
+			if (PEAR::isError($iLastOSMID) || !$iLastOSMID)
 			{
-				$aPrevRepMatch = false;
-				foreach($aRepMatches as $aRepMatch)
-				{
-					if (strtotime($aRepMatch[2]) < $iLastNodeTimestamp) break;
-					$aPrevRepMatch = $aRepMatch;
-				}
-				if ($aPrevRepMatch) $aRepMatch = $aPrevRepMatch;
-
-				$sRepURL .= $aRepMatch[1];
-				$sRep = file_get_contents($sRepURL."?C=M;O=D;F=1");
-				preg_match_all('#<a href="[0-9]{3}/">([0-9]{3}/)</a>\s*([-0-9a-zA-Z]+ [0-9]{2}:[0-9]{2})#', $sRep, $aRepMatches, PREG_SET_ORDER);
-				$aPrevRepMatch = false;
-				foreach($aRepMatches as $aRepMatch)
-				{
-					if (strtotime($aRepMatch[2]) < $iLastNodeTimestamp) break;
-					$aPrevRepMatch = $aRepMatch;
-				}
-				if ($aPrevRepMatch) $aRepMatch = $aPrevRepMatch;
-
-				$sRepURL .= $aRepMatch[1];
-				$sRep = file_get_contents($sRepURL."?C=M;O=D;F=1");
-				preg_match_all('#<a href="[0-9]{3}.state.txt">([0-9]{3}).state.txt</a>\s*([-0-9a-zA-Z]+ [0-9]{2}:[0-9]{2})#', $sRep, $aRepMatches, PREG_SET_ORDER);
-				$aPrevRepMatch = false;
-				foreach($aRepMatches as $aRepMatch)
-				{
-					if (strtotime($aRepMatch[2]) < $iLastNodeTimestamp) break;
-					$aPrevRepMatch = $aRepMatch;
-				}
-				if ($aPrevRepMatch) $aRepMatch = $aPrevRepMatch;
-
-				$sRepURL .= $aRepMatch[1].'.state.txt';
-				echo "Getting state file: $sRepURL\n";
-				$sStateFile = file_get_contents($sRepURL);
-				if (!$sStateFile || strlen($sStateFile) > 1000) fail("unable to obtain state file");
-				file_put_contents(CONST_BasePath.'/settings/state.txt', $sStateFile);
-				echo "Updating DB status\n";
-				pg_query($oDB->connection, 'TRUNCATE import_status');
-				$sSQL = "INSERT INTO import_status VALUES('".$aRepMatch[2]."')";
-				pg_query($oDB->connection, $sSQL);
+				echo "Could not determine date of database.\n";
 			}
 			else
 			{
-				if (!$aCMDResult['all'])
+				// Lookup the timestamp that node was created
+				// (less 3 hours for margin for changsets to be closed)
+				$sLastNodeURL = 'http://www.openstreetmap.org/api/0.6/node/'.$iLastOSMID."/1";
+				$sLastNodeXML = file_get_contents($sLastNodeURL);
+				preg_match('#timestamp="(([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z)"#', $sLastNodeXML, $aLastNodeDate);
+				$iLastNodeTimestamp = strtotime($aLastNodeDate[1]) - (3*60*60);
+
+				// Search for the correct state file - uses file timestamps so need to sort by date descending
+				$sRepURL = CONST_Replication_Url."/";
+				$sRep = file_get_contents($sRepURL."?C=M;O=D;F=1");
+				// download.geofabrik.de:    <a href="000/">000/</a></td><td align="right">26-Feb-2013 11:53  </td>
+				// planet.openstreetmap.org: <a href="273/">273/</a>                    2013-03-11 07:41    -
+				preg_match_all('#<a href="[0-9]{3}/">([0-9]{3}/)</a>\s*([-0-9a-zA-Z]+ [0-9]{2}:[0-9]{2})#', $sRep, $aRepMatches, PREG_SET_ORDER);
+				if ($aRepMatches)
 				{
-					fail("Cannot read state file directory.");
+					$aPrevRepMatch = false;
+					foreach($aRepMatches as $aRepMatch)
+					{
+						if (strtotime($aRepMatch[2]) < $iLastNodeTimestamp) break;
+						$aPrevRepMatch = $aRepMatch;
+					}
+					if ($aPrevRepMatch) $aRepMatch = $aPrevRepMatch;
+
+					$sRepURL .= $aRepMatch[1];
+					$sRep = file_get_contents($sRepURL."?C=M;O=D;F=1");
+					preg_match_all('#<a href="[0-9]{3}/">([0-9]{3}/)</a>\s*([-0-9a-zA-Z]+ [0-9]{2}:[0-9]{2})#', $sRep, $aRepMatches, PREG_SET_ORDER);
+					$aPrevRepMatch = false;
+					foreach($aRepMatches as $aRepMatch)
+					{
+						if (strtotime($aRepMatch[2]) < $iLastNodeTimestamp) break;
+						$aPrevRepMatch = $aRepMatch;
+					}
+					if ($aPrevRepMatch) $aRepMatch = $aPrevRepMatch;
+
+					$sRepURL .= $aRepMatch[1];
+					$sRep = file_get_contents($sRepURL."?C=M;O=D;F=1");
+					preg_match_all('#<a href="[0-9]{3}.state.txt">([0-9]{3}).state.txt</a>\s*([-0-9a-zA-Z]+ [0-9]{2}:[0-9]{2})#', $sRep, $aRepMatches, PREG_SET_ORDER);
+					$aPrevRepMatch = false;
+					foreach($aRepMatches as $aRepMatch)
+					{
+						if (strtotime($aRepMatch[2]) < $iLastNodeTimestamp) break;
+						$aPrevRepMatch = $aRepMatch;
+					}
+					if ($aPrevRepMatch) $aRepMatch = $aPrevRepMatch;
+
+					$sRepURL .= $aRepMatch[1].'.state.txt';
+					echo "Getting state file: $sRepURL\n";
+					$sStateFile = file_get_contents($sRepURL);
+					if (!$sStateFile || strlen($sStateFile) > 1000) fail("unable to obtain state file");
+					file_put_contents(CONST_SitePath.'/state.txt', $sStateFile);
+					echo "Updating DB status\n";
+					pg_query($oDB->connection, 'TRUNCATE import_status');
+					$sSQL = "INSERT INTO import_status VALUES('".$aRepMatch[2]."')";
+					pg_query($oDB->connection, $sSQL);
+				}
+				else
+				{
+					if (!$aCMDResult['all'])
+					{
+						fail("Cannot read state file directory.");
+					}
 				}
 			}
 		}
@@ -723,7 +731,7 @@
 		if (!$sTestFile)
 		{
 			echo "\nWARNING: Unable to access the website at ".CONST_Website_BaseURL."\n";
-			echo "You may want to update settings/local.php with @define('CONST_Website_BaseURL', 'http://[HOST]/[PATH]/');\n";
+			echo "You may want to update <site>/settings.php with @define('CONST_Website_BaseURL', 'http://[HOST]/[PATH]/');\n";
 		}
 	}
 
