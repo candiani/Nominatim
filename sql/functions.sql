@@ -10,195 +10,7 @@ END;
 $$
 LANGUAGE plpgsql IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION transliteration(text) RETURNS text
-  AS '{modulepath}/nominatim.so', 'transliteration'
-LANGUAGE c IMMUTABLE STRICT;
 
-CREATE OR REPLACE FUNCTION gettokenstring(text) RETURNS text
-  AS '{modulepath}/nominatim.so', 'gettokenstring'
-LANGUAGE c IMMUTABLE STRICT;
-
-CREATE OR REPLACE FUNCTION make_standard_name(name TEXT) RETURNS TEXT
-  AS $$
-DECLARE
-  o TEXT;
-BEGIN
-  o := gettokenstring(transliteration(name));
-  RETURN trim(substr(o,1,length(o)));
-END;
-$$
-LANGUAGE 'plpgsql' IMMUTABLE;
-
--- returns NULL if the word is too common
-CREATE OR REPLACE FUNCTION getorcreate_word_id(lookup_word TEXT) 
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-  count INTEGER;
-BEGIN
-  lookup_token := trim(lookup_word);
-  SELECT min(word_id), max(search_name_count) FROM word WHERE word_token = lookup_token and class is null and type is null into return_word_id, count;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, null, null, null, null, 0);
-  ELSE
-    IF count > get_maxwordfreq() THEN
-      return_word_id := NULL;
-    END IF;
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION getorcreate_housenumber_id(lookup_word TEXT)
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and class='place' and type='house' into return_word_id;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, null, 'place', 'house', null, 0);
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION getorcreate_country(lookup_word TEXT, lookup_country_code varchar(2))
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and country_code=lookup_country_code into return_word_id;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, null, null, null, lookup_country_code, 0);
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION getorcreate_amenity(lookup_word TEXT, lookup_class text, lookup_type text)
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and class=lookup_class and type = lookup_type into return_word_id;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, null, lookup_class, lookup_type, null, 0);
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION getorcreate_amenityoperator(lookup_word TEXT, lookup_class text, lookup_type text, op text)
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and class=lookup_class and type = lookup_type and operator = op into return_word_id;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, null, lookup_class, lookup_type, null, 0, op);
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION getorcreate_name_id(lookup_word TEXT, src_word TEXT) 
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  nospace_lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and class is null and type is null into return_word_id;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, src_word, null, null, null, 0);
---    nospace_lookup_token := replace(replace(lookup_token, '-',''), ' ','');
---    IF ' '||nospace_lookup_token != lookup_token THEN
---      INSERT INTO word VALUES (return_word_id, '-'||nospace_lookup_token, null, src_word, null, null, null, 0, null);
---    END IF;
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION getorcreate_name_id(lookup_word TEXT) 
-  RETURNS INTEGER
-  AS $$
-DECLARE
-BEGIN
-  RETURN getorcreate_name_id(lookup_word, '');
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION get_word_id(lookup_word TEXT) 
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and class is null and type is null into return_word_id;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE;
-
-CREATE OR REPLACE FUNCTION get_name_id(lookup_word TEXT) 
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and class is null and type is null into return_word_id;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE;
-
-CREATE OR REPLACE FUNCTION get_name_ids(lookup_word TEXT)
-  RETURNS INTEGER[]
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_ids INTEGER[];
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT array_agg(word_id) FROM word WHERE word_token = lookup_token and class is null and type is null into return_word_ids;
-  RETURN return_word_ids;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE;
 
 CREATE OR REPLACE FUNCTION array_merge(a INTEGER[], b INTEGER[])
   RETURNS INTEGER[]
@@ -224,170 +36,7 @@ END;
 $$
 LANGUAGE plpgsql IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION create_country(src HSTORE, lookup_country_code varchar(2)) RETURNS VOID
-  AS $$
-DECLARE
-  s TEXT;
-  w INTEGER;
-  words TEXT[];
-  item RECORD;
-  j INTEGER;
-BEGIN
-  FOR item IN SELECT (each(src)).* LOOP
 
-    s := make_standard_name(item.value);
-    w := getorcreate_country(s, lookup_country_code);
-
-    words := regexp_split_to_array(item.value, E'[,;()]');
-    IF array_upper(words, 1) != 1 THEN
-      FOR j IN 1..array_upper(words, 1) LOOP
-        s := make_standard_name(words[j]);
-        IF s != '' THEN
-          w := getorcreate_country(s, lookup_country_code);
-        END IF;
-      END LOOP;
-    END IF;
-  END LOOP;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION make_keywords(src HSTORE) RETURNS INTEGER[]
-  AS $$
-DECLARE
-  result INTEGER[];
-  s TEXT;
-  w INTEGER;
-  words TEXT[];
-  item RECORD;
-  j INTEGER;
-BEGIN
-  result := '{}'::INTEGER[];
-
-  FOR item IN SELECT (each(src)).* LOOP
-
-    s := make_standard_name(item.value);
-
-    w := getorcreate_name_id(s, item.value);
-
-    IF not(ARRAY[w] <@ result) THEN
-      result := result || w;
-    END IF;
-
-    w := getorcreate_word_id(s);
-
-    IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
-      result := result || w;
-    END IF;
-
-    words := string_to_array(s, ' ');
-    IF array_upper(words, 1) IS NOT NULL THEN
-      FOR j IN 1..array_upper(words, 1) LOOP
-        IF (words[j] != '') THEN
-          w = getorcreate_word_id(words[j]);
-          IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
-            result := result || w;
-          END IF;
-        END IF;
-      END LOOP;
-    END IF;
-
-    words := regexp_split_to_array(item.value, E'[,;()]');
-    IF array_upper(words, 1) != 1 THEN
-      FOR j IN 1..array_upper(words, 1) LOOP
-        s := make_standard_name(words[j]);
-        IF s != '' THEN
-          w := getorcreate_word_id(s);
-          IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
-            result := result || w;
-          END IF;
-        END IF;
-      END LOOP;
-    END IF;
-
-    s := regexp_replace(item.value, '市$', '');
-    IF s != item.value THEN
-      s := make_standard_name(s);
-      IF s != '' THEN
-        w := getorcreate_name_id(s, item.value);
-        IF NOT (ARRAY[w] <@ result) THEN
-          result := result || w;
-        END IF;
-      END IF;
-    END IF;
-
-  END LOOP;
-
-  RETURN result;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE;
-
-CREATE OR REPLACE FUNCTION make_keywords(src TEXT) RETURNS INTEGER[]
-  AS $$
-DECLARE
-  result INTEGER[];
-  s TEXT;
-  w INTEGER;
-  words TEXT[];
-  i INTEGER;
-  j INTEGER;
-BEGIN
-  result := '{}'::INTEGER[];
-
-  s := make_standard_name(src);
-  w := getorcreate_name_id(s, src);
-
-  IF NOT (ARRAY[w] <@ result) THEN
-    result := result || w;
-  END IF;
-
-  w := getorcreate_word_id(s);
-
-  IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
-    result := result || w;
-  END IF;
-
-  words := string_to_array(s, ' ');
-  IF array_upper(words, 1) IS NOT NULL THEN
-    FOR j IN 1..array_upper(words, 1) LOOP
-      IF (words[j] != '') THEN
-        w = getorcreate_word_id(words[j]);
-        IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
-          result := result || w;
-        END IF;
-      END IF;
-    END LOOP;
-  END IF;
-
-  words := regexp_split_to_array(src, E'[,;()]');
-  IF array_upper(words, 1) != 1 THEN
-    FOR j IN 1..array_upper(words, 1) LOOP
-      s := make_standard_name(words[j]);
-      IF s != '' THEN
-        w := getorcreate_word_id(s);
-        IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
-          result := result || w;
-        END IF;
-      END IF;
-    END LOOP;
-  END IF;
-
-  s := regexp_replace(src, '市$', '');
-  IF s != src THEN
-    s := make_standard_name(s);
-    IF s != '' THEN
-      w := getorcreate_name_id(s, src);
-      IF NOT (ARRAY[w] <@ result) THEN
-        result := result || w;
-      END IF;
-    END IF;
-  END IF;
-
-  RETURN result;
-END;
-$$
-LANGUAGE plpgsql IMMUTABLE;
 
 CREATE OR REPLACE FUNCTION get_country_code(place geometry) RETURNS TEXT
   AS $$
@@ -598,7 +247,7 @@ BEGIN
   END IF;
 
   IF addr_street IS NOT NULL THEN
-    address_street_word_ids := get_name_ids(make_standard_name(addr_street));
+    address_street_word_ids := get_name_ids(addr_street);
     IF address_street_word_ids IS NOT NULL THEN
       FOR location IN SELECT place_id from getNearestNamedRoadFeature(partition, centroid, address_street_word_ids) LOOP
         parent_place_id := location.place_id;
@@ -607,7 +256,7 @@ BEGIN
   END IF;
 
   IF parent_place_id IS NULL AND addr_place IS NOT NULL THEN
-    address_street_word_ids := get_name_ids(make_standard_name(addr_place));
+    address_street_word_ids := get_name_ids(addr_place);
     IF address_street_word_ids IS NOT NULL THEN
       FOR location IN SELECT place_id from getNearestNamedPlaceFeature(partition, centroid, address_street_word_ids) LOOP
         parent_place_id := location.place_id;
@@ -818,7 +467,7 @@ BEGIN
   END IF;
 
   IF NEW.housenumber IS NOT NULL THEN
-    i := getorcreate_housenumber_id(make_standard_name(NEW.housenumber));
+    i := create_housenumber_id(NEW.housenumber);
   END IF;
 
   IF NEW.osm_type = 'X' THEN
@@ -1308,7 +957,7 @@ BEGIN
 
       -- Note that addr:street links can only be indexed once the street itself is indexed
        IF NEW.parent_place_id IS NULL AND NEW.street IS NOT NULL THEN
-        address_street_word_ids := get_name_ids(make_standard_name(NEW.street));
+        address_street_word_ids := get_name_ids(NEW.street);
         IF address_street_word_ids IS NOT NULL THEN
           FOR location IN SELECT * from getNearestNamedRoadFeature(NEW.partition, place_centroid, address_street_word_ids) LOOP
               NEW.parent_place_id := location.place_id;
@@ -1317,7 +966,7 @@ BEGIN
       END IF;
 
       IF NEW.parent_place_id IS NULL AND NEW.addr_place IS NOT NULL THEN
-        address_street_word_ids := get_name_ids(make_standard_name(NEW.addr_place));
+        address_street_word_ids := get_name_ids(NEW.addr_place);
         IF address_street_word_ids IS NOT NULL THEN
           FOR location IN SELECT * from getNearestNamedPlaceFeature(NEW.partition, place_centroid, address_street_word_ids) LOOP
             NEW.parent_place_id := location.place_id;
@@ -1364,7 +1013,7 @@ BEGIN
 
           -- If the way mentions a street or place address, try that for parenting.
           IF NEW.parent_place_id IS NULL AND location.street IS NOT NULL THEN
-            address_street_word_ids := get_name_ids(make_standard_name(location.street));
+            address_street_word_ids := get_name_ids(location.street);
             IF address_street_word_ids IS NOT NULL THEN
               FOR linkedplacex IN SELECT place_id from getNearestNamedRoadFeature(NEW.partition, place_centroid, address_street_word_ids) LOOP
                   NEW.parent_place_id := linkedplacex.place_id;
@@ -1373,7 +1022,7 @@ BEGIN
           END IF;
 
           IF NEW.parent_place_id IS NULL AND location.addr_place IS NOT NULL THEN
-            address_street_word_ids := get_name_ids(make_standard_name(location.addr_place));
+            address_street_word_ids := get_name_ids(location.addr_place);
             IF address_street_word_ids IS NOT NULL THEN
               FOR linkedplacex IN SELECT place_id from getNearestNamedPlaceFeature(NEW.partition, place_centroid, address_street_word_ids) LOOP
                 NEW.parent_place_id := linkedplacex.place_id;
@@ -1403,20 +1052,10 @@ BEGIN
         select * from search_name where place_id = NEW.parent_place_id INTO location;
         NEW.calculated_country_code := location.country_code;
 
-        -- Merge the postcode into the parent's address if necessary XXXX
+        -- Merge the postcode into the parent's address if necessary
         IF NEW.postcode IS NOT NULL THEN
-          isin_tokens := '{}'::int[];
-          address_street_word_id := getorcreate_word_id(make_standard_name(NEW.postcode));
-          IF address_street_word_id is not null
-             and not ARRAY[address_street_word_id] <@ location.nameaddress_vector THEN
-             isin_tokens := isin_tokens || address_street_word_id;
-          END IF;
-          address_street_word_id := getorcreate_name_id(make_standard_name(NEW.postcode));
-          IF address_street_word_id is not null
-             and not ARRAY[address_street_word_id] <@ location.nameaddress_vector THEN
-             isin_tokens := isin_tokens || address_street_word_id;
-          END IF;
-          IF isin_tokens != '{}'::int[] THEN
+          isin_tokens := make_keywords(hstore('ref', NEW.postcode));
+          IF isin_tokens != '{}'::int[] and not isin_tokens <@ location.nameaddress_vector THEN
              UPDATE search_name
                 SET nameaddress_vector = search_name.nameaddress_vector || isin_tokens
               WHERE place_id = NEW.parent_place_id;
@@ -1604,14 +1243,14 @@ BEGIN
       isin := regexp_split_to_array(NEW.isin, E'[;,]');
       IF array_upper(isin, 1) IS NOT NULL THEN
         FOR i IN 1..array_upper(isin, 1) LOOP
-          address_street_word_id := get_name_id(make_standard_name(isin[i]));
+          address_street_word_id := get_name_id(isin[i]);
           IF address_street_word_id IS NOT NULL AND NOT(ARRAY[address_street_word_id] <@ isin_tokens) THEN
             nameaddress_vector := array_merge(nameaddress_vector, ARRAY[address_street_word_id]);
             isin_tokens := isin_tokens || address_street_word_id;
           END IF;
 
           -- merge word into address vector
-          address_street_word_id := get_word_id(make_standard_name(isin[i]));
+          address_street_word_id := get_word_id(isin[i]);
           IF address_street_word_id IS NOT NULL THEN
             nameaddress_vector := array_merge(nameaddress_vector, ARRAY[address_street_word_id]);
           END IF;
@@ -1622,14 +1261,14 @@ BEGIN
       isin := regexp_split_to_array(NEW.postcode, E'[;,]');
       IF array_upper(isin, 1) IS NOT NULL THEN
         FOR i IN 1..array_upper(isin, 1) LOOP
-          address_street_word_id := get_name_id(make_standard_name(isin[i]));
+          address_street_word_id := get_name_id(isin[i]);
           IF address_street_word_id IS NOT NULL AND NOT(ARRAY[address_street_word_id] <@ isin_tokens) THEN
             nameaddress_vector := array_merge(nameaddress_vector, ARRAY[address_street_word_id]);
             isin_tokens := isin_tokens || address_street_word_id;
           END IF;
 
           -- merge into address vector
-          address_street_word_id := get_word_id(make_standard_name(isin[i]));
+          address_street_word_id := get_word_id(isin[i]);
           IF address_street_word_id IS NOT NULL THEN
             nameaddress_vector := array_merge(nameaddress_vector, ARRAY[address_street_word_id]);
           END IF;
@@ -1640,12 +1279,12 @@ BEGIN
     -- for the USA we have an additional address table.  Merge in zip codes from there too
     IF NEW.rank_search = 26 AND NEW.calculated_country_code = 'us' THEN
       FOR location IN SELECT distinct postcode from location_property_tiger where parent_place_id = NEW.place_id LOOP
-        address_street_word_id := get_name_id(make_standard_name(location.postcode));
+        address_street_word_id := get_name_id(location.postcode);
         nameaddress_vector := array_merge(nameaddress_vector, ARRAY[address_street_word_id]);
         isin_tokens := isin_tokens || address_street_word_id;
 
         -- also merge in the single word version
-        address_street_word_id := get_word_id(make_standard_name(location.postcode));
+        address_street_word_id := get_word_id(location.postcode);
         nameaddress_vector := array_merge(nameaddress_vector, ARRAY[address_street_word_id]);
       END LOOP;
     END IF;
@@ -2519,7 +2158,7 @@ BEGIN
   out_partition := get_partition(in_countrycode);
   out_parent_place_id := null;
 
-  address_street_word_id := get_name_id(make_standard_name(in_street));
+  address_street_word_id := get_name_id(in_street);
   IF address_street_word_id IS NOT NULL THEN
     FOR location IN SELECT * from getNearestNamedRoadFeature(out_partition, place_centroid, address_street_word_id) LOOP
       out_parent_place_id := location.place_id;

@@ -59,22 +59,6 @@ GRANT SELECT ON TABLE gb_postcode TO "{www-user}";
 create view vw_search_query_log as SELECT substr(query, 1, 50) AS query, starttime, endtime - starttime AS duration, substr(useragent, 1, 20) as 
 useragent, language, results, ipaddress FROM new_query_log WHERE type = 'search' ORDER BY starttime DESC;
 
-drop table IF EXISTS word;
-CREATE TABLE word (
-  word_id INTEGER,
-  word_token text,
-  word text,
-  class text,
-  type text,
-  country_code varchar(2),
-  search_name_count INTEGER,
-  operator TEXT
-  ) {ts:search-data};
-CREATE INDEX idx_word_word_token on word USING BTREE (word_token) {ts:search-index};
-GRANT SELECT ON word TO "{www-user}" ;
-DROP SEQUENCE IF EXISTS seq_word;
-CREATE SEQUENCE seq_word start 1;
-
 drop table IF EXISTS location_area CASCADE;
 CREATE TABLE location_area (
   partition integer,

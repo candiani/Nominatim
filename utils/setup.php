@@ -269,6 +269,7 @@
 
 		echo "Tables\n";
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/tables.sql');
+		$sTemplate .= file_get_contents(CONST_SitePath.'modules/transliterate/tables.sql');
 		$sTemplate = str_replace('{www-user}', CONST_Database_Web_User, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:address-data}',
 		                                CONST_Tablespace_Address_Data, $sTemplate);
@@ -287,6 +288,8 @@
 		// re-run the functions
 		echo "Functions\n";
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/functions.sql');
+		pgsqlRunScript($sTemplate);
+		$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/functions.sql');
 		$sTemplate = str_replace('{modulepath}',
 			                     CONST_SitePath.'/modules/transliterate', $sTemplate);
 		pgsqlRunScript($sTemplate);
@@ -700,6 +703,14 @@
 			$sTemplate = str_replace($aMatch[0], $sResult, $sTemplate);
 		}
 
+		pgsqlRunScript($sTemplate);
+		$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/indices.src.sql');
+		$sTemplate = replace_tablespace('{ts:address-index}',
+		                                CONST_Tablespace_Address_Index, $sTemplate);
+		$sTemplate = replace_tablespace('{ts:search-index}',
+		                                CONST_Tablespace_Search_Index, $sTemplate);
+		$sTemplate = replace_tablespace('{ts:aux-index}',
+		                                CONST_Tablespace_Aux_Index, $sTemplate);
 		pgsqlRunScript($sTemplate);
 	}
 

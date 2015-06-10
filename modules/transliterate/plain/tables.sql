@@ -1,18 +1,20 @@
---
--- PostgreSQL database dump
---
+-- word tokens are saved in a table
+drop table IF EXISTS word;
+CREATE TABLE word (
+  word_id INTEGER,
+  word_token text,
+  word text,
+  class text,
+  type text,
+  country_code varchar(2),
+  search_name_count INTEGER,
+  operator TEXT
+  ) {ts:search-data};
 
-SET statement_timeout = 0;
-SET client_encoding = 'UTF8';
-SET standard_conforming_strings = on;
-SET check_function_bodies = false;
-SET client_min_messages = warning;
-
-SET search_path = public, pg_catalog;
-
-SET default_tablespace = '';
-
-SET default_with_oids = false;
+CREATE INDEX idx_word_word_token on word USING BTREE (word_token) {ts:search-index};
+GRANT SELECT ON word TO "{www-user}" ;
+DROP SEQUENCE IF EXISTS seq_word;
+CREATE SEQUENCE seq_word start 1;
 
 --
 -- Name: word_frequencies; Type: TABLE; Schema: public; Owner: -; Tablespace: 
@@ -49637,7 +49639,7 @@ kein	100
 
 select count(make_keywords(v)) from (select distinct svals(name) as v from place) as w where v is not null;
 select count(make_keywords(v)) from (select distinct postcode as v from place) as w where v is not null;
-select count(getorcreate_housenumber_id(make_standard_name(v))) from (select distinct housenumber as v from place where housenumber is not null) as w;
+select count(create_housenumber_id(v)) from (select distinct housenumber as v from place where housenumber is not null) as w;
 
 -- copy the word frequencies
 update word set search_name_count = count from word_frequencies wf where wf.word_token = word.word_token;

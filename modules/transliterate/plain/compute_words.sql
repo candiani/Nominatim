@@ -5,7 +5,7 @@ CREATE TABLE word_frequencies AS
  GROUP BY id);
 
 select count(make_keywords(v)) from (select distinct postcode as v from place) as w where v is not null;
-select count(getorcreate_housenumber_id(make_standard_name(v))) from (select distinct housenumber as v from place where housenumber is not null) as w;
+select count(create_housenumber_id(v)) from (select distinct housenumber as v from place where housenumber is not null) as w;
 
 -- copy the word frequencies
 update word set search_name_count = count from word_frequencies wf where wf.id = word.word_id;

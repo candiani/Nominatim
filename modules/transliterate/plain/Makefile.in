@@ -7,7 +7,7 @@ all:
 	chmod 755 nominatim.so
 
 install:
-	@echo Library does not need to be installed.
+	@echo Use site-install to install this module.
 
 site-install: SITE_MODDIR = $(SITE)/modules/transliterate
 
@@ -17,4 +17,5 @@ site-install:
 	@install -d '$(SITE_MODDIR)'
 	@rm -f "$(SITE_MODDIR)/*"
 	install -t $(SITE_MODDIR) nominatim.so
+	install -t $(SITE_MODDIR) -m 644 tables.sql functions.sql indices.sql
 
