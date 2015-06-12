@@ -2,6 +2,7 @@
 <?php
 
 	require_once(dirname(dirname(__FILE__)).'/lib/init-cmd.php');
+	require_once(CONST_SitePath.'/modules/transliterate/tokenizer.php');
 	ini_set('memory_limit', '800M');
 
 	$aCMDOptions = array(
@@ -124,18 +125,18 @@
 			pgsqlRunScriptFile(CONST_Path_Postgresql_Contrib.'/hstore.sql');
 			pgsqlRunScriptFile(CONST_BasePath.'/sql/hstore_compatability_9_0.sql');
 		} else {
-			pgsqlRunScript('CREATE EXTENSION hstore');
+			pgsqlRunScript('CREATE EXTENSION hstore', !$aCMDResult['ignore-errors']);
 		}
 
 		if ($fPostgisVersion < 2.0) {
 			pgsqlRunScriptFile(CONST_Path_Postgresql_Postgis.'/postgis.sql');
 			pgsqlRunScriptFile(CONST_Path_Postgresql_Postgis.'/spatial_ref_sys.sql');
 		} else {
-			pgsqlRunScript('CREATE EXTENSION postgis');
+			pgsqlRunScript('CREATE EXTENSION postgis', !$aCMDResult['ignore-errors']);
 		}
 		if ($fPostgisVersion < 2.1) {
 			// Function was renamed in 2.1 and throws an annoying deprecation warning
-			pgsqlRunScript('ALTER FUNCTION st_line_interpolate_point(geometry, double precision) RENAME TO ST_LineInterpolatePoint');
+			pgsqlRunScript('ALTER FUNCTION st_line_interpolate_point(geometry, double precision) RENAME TO ST_LineInterpolatePoint', !$aCMDResult['ignore-errors']);
 		}
 		$sVersionString = $oDB->getOne('select postgis_full_version()');
 		preg_match('#POSTGIS="([0-9]+)[.]([0-9]+)[.]([0-9]+)( r([0-9]+))?"#', $sVersionString, $aMatches);
@@ -163,15 +164,15 @@
 
 		if ($aCMDResult['no-partitions'])
 		{
-			pgsqlRunScript('update country_name set partition = 0');
+			pgsqlRunScript('update country_name set partition = 0', !$aCMDResult['ignore-errors']);
 		}
 
 		// the following will be needed by create_functions later but
 		// is only defined in the subsequently called create_tables.
 		// Create dummies here that will be overwritten by the proper
 		// versions in create-tables.
-		pgsqlRunScript('CREATE TABLE place_boundingbox ()');
-		pgsqlRunScript('create type wikipedia_article_match as ()');
+		pgsqlRunScript('CREATE TABLE place_boundingbox ()', !$aCMDResult['ignore-errors']);
+		pgsqlRunScript('create type wikipedia_article_match as ()', !$aCMDResult['ignore-errors']);
 	}
 
 	if ($aCMDResult['import-data'] || $aCMDResult['all'])
@@ -217,20 +218,23 @@
 		echo "Functions\n";
 		$bDidSomething = true;
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/functions.sql');
-		$sTemplate = str_replace('{modulepath}', CONST_SitePath.'/modules/transliterate', $sTemplate);
 		if ($aCMDResult['enable-diff-updates']) $sTemplate = str_replace('RETURN NEW; -- @DIFFUPDATES@', '--', $sTemplate);
 		if ($aCMDResult['enable-debug-statements']) $sTemplate = str_replace('--DEBUG:', '', $sTemplate);
 		if (CONST_Limit_Reindexing) $sTemplate = str_replace('--LIMIT INDEXING:', '', $sTemplate);
-		pgsqlRunScript($sTemplate);
+		pgsqlRunScript($sTemplate, !$aCMDResult['ignore-errors']);
 
-		if ($fPostgisVersion < 2.0) {
+		$oDB =& getDB();
+		Tokenizer::updateFunctions($oDB, $aCMDResult['ignore-errors'], $aCMDResult['enable-debug-statements']);
+
+		if ($fPostgisVersion < 2.0)
+		{
 			echo "Helper functions for postgis < 2.0\n";
 			$sTemplate = file_get_contents(CONST_BasePath.'/sql/postgis_15_aux.sql');
 		} else {
 			echo "Helper functions for postgis >= 2.0\n";
 			$sTemplate = file_get_contents(CONST_BasePath.'/sql/postgis_20_aux.sql');
 		}
-		pgsqlRunScript($sTemplate);
+		pgsqlRunScript($sTemplate, !$aCMDResult['ignore-errors']);
 	}
 
 	if ($aCMDResult['create-minimal-tables'])
@@ -260,7 +264,7 @@
 			$sScript .= "ON place_classtype_".$sClass."_".$sType." USING btree(place_id);\n";
 		}
 		fclose($hFile);
-		pgsqlRunScript($sScript);
+		pgsqlRunScript($sScript, !$aCMDResult['ignore-errors']);
 	}
 
 	if ($aCMDResult['create-tables'] || $aCMDResult['all'])
@@ -284,17 +288,19 @@
 				CONST_Tablespace_Aux_Index, $sTemplate);
 		pgsqlRunScript($sTemplate, false);
 
+		// used by getorcreate_word_id to ignore frequent partial words
+		pgRun($oDB, 'CREATE OR REPLACE FUNCTION get_maxwordfreq() RETURNS integer AS $$ SELECT '.CONST_Max_Word_Frequency.' as maxwordfreq; $$ LANGUAGE SQL IMMUTABLE');
+		echo ".\n";
+
 		$oDB =& getDB();
-		Tokenizer::prepareSetup($oDB);
+		Tokenizer::prepareSetup($oDB, $aCMDResult['ignore-errors']);
 
 		// re-run the functions
 		echo "Functions\n";
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/functions.sql');
-		pgsqlRunScript($sTemplate);
-		$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/functions.sql');
-		$sTemplate = str_replace('{modulepath}',
-			                     CONST_SitePath.'/modules/transliterate', $sTemplate);
-		pgsqlRunScript($sTemplate);
+		pgsqlRunScript($sTemplate, !$aCMDResult['ignore-errors']);
+		$oDB =& getDB();
+		Tokenizer::updateFunctions($oDB, $aCMDResult['ignore-errors'], $aCMDResult['enable-debug-statements']);
 	}
 
 	if ($aCMDResult['create-partition-tables'] || $aCMDResult['all'])
@@ -334,7 +340,7 @@
 			$sTemplate = str_replace($aMatch[0], $sResult, $sTemplate);
 		}
 
-		pgsqlRunScript($sTemplate);
+		pgsqlRunScript($sTemplate, !$aCMDResult['ignore-errors']);
 	}
 
 
@@ -363,7 +369,7 @@
 			$sTemplate = str_replace($aMatch[0], $sResult, $sTemplate);
 		}
 
-		pgsqlRunScript($sTemplate);
+		pgsqlRunScript($sTemplate, !$aCMDResult['ignore-errors']);
 	}
 
 	if ($aCMDResult['import-wikipedia-articles'] || $aCMDResult['all'])
@@ -400,8 +406,6 @@
 		$bDidSomething = true;
 
 		$oDB =& getDB();
-		pgRun($oDB, 'TRUNCATE word');
-		echo '.';
 		pgRun($oDB, 'TRUNCATE placex');
 		echo '.';
 		pgRun($oDB, 'TRUNCATE place_addressline');
@@ -432,17 +436,6 @@
 			echo '.';
 		}
 
-		// used by getorcreate_word_id to ignore frequent partial words
-		pgRun($oDB, 'CREATE OR REPLACE FUNCTION get_maxwordfreq() RETURNS integer AS $$ SELECT '.CONST_Max_Word_Frequency.' as maxwordfreq; $$ LANGUAGE SQL IMMUTABLE');
-		echo ".\n";
-
-		// pre-create the word list
-		if (!$aCMDResult['disable-token-precalc'])
-		{
-			echo "Loading word list\n";
-			pgsqlRunScriptFile(CONST_BasePath.'/data/words.sql');
-		}
-
 		echo "Load Data\n";
 		$aDBInstances = array();
 		for($i = 0; $i < $iInstances; $i++)
@@ -467,7 +460,7 @@
 		}
 		echo "\n";
 		echo "Reanalysing database...\n";
-		pgsqlRunScript('ANALYSE');
+		pgsqlRunScript('ANALYSE', !$aCMDResult['ignore-errors']);
 	}
 
 	if ($aCMDResult['import-tiger-data'])
@@ -668,9 +661,9 @@
 		if (isset($aCMDResult['index-output'])) $sOutputFile = ' -F '.$aCMDResult['index-output'];
 		$sBaseCmd = CONST_BasePath.'/nominatim/nominatim -i -d '.$aDSNInfo['database'].' -P '.$aDSNInfo['port'].' -t '.$iInstances.$sOutputFile;
 		passthruCheckReturn($sBaseCmd.' -R 4');
-		if (!$aCMDResult['index-noanalyse']) pgsqlRunScript('ANALYSE');
+		if (!$aCMDResult['index-noanalyse']) pgsqlRunScript('ANALYSE', !$aCMDResult['ignore-errors']);
 		passthruCheckReturn($sBaseCmd.' -r 5 -R 25');
-		if (!$aCMDResult['index-noanalyse']) pgsqlRunScript('ANALYSE');
+		if (!$aCMDResult['index-noanalyse']) pgsqlRunScript('ANALYSE', !$aCMDResult['ignore-errors']);
 		passthruCheckReturn($sBaseCmd.' -r 26');
 	}
 
@@ -705,10 +698,10 @@
 			$sTemplate = str_replace($aMatch[0], $sResult, $sTemplate);
 		}
 
-		pgsqlRunScript($sTemplate);
+		pgsqlRunScript($sTemplate, !$aCMDResult['ignore-errors']);
 
 		// and module finalizing scripts
-		Tokenizer::finishSetup($oDB);
+		Tokenizer::finishSetup($oDB, $aCMDResult['ignore-errors']);
 	}
 
 	if (isset($aCMDResult['create-website']))
@@ -807,38 +800,6 @@
 			proc_close($hGzipProcess);
 		}
 
-	}
-
-	function pgsqlRunScript($sScript, $bfatal = true)
-	{
-		global $aCMDResult;
-		// Convert database DSN to psql parameters
-		$aDSNInfo = DB::parseDSN(CONST_Database_DSN);
-		if (!isset($aDSNInfo['port']) || !$aDSNInfo['port']) $aDSNInfo['port'] = 5432;
-		$sCMD = 'psql -p '.$aDSNInfo['port'].' -d '.$aDSNInfo['database'];
-		if ($bfatal && !$aCMDResult['ignore-errors'])
-			$sCMD .= ' -v ON_ERROR_STOP=1';
-		$aDescriptors = array(
-			0 => array('pipe', 'r'),
-			1 => STDOUT, 
-			2 => STDERR
-		);
-		$ahPipes = null;
-		$hProcess = @proc_open($sCMD, $aDescriptors, $ahPipes);
-		if (!is_resource($hProcess)) fail('unable to start pgsql');
-
-		while(strlen($sScript))
-		{
-			$written = fwrite($ahPipes[0], $sScript);
-			if ($written <= 0) break;
-			$sScript = substr($sScript, $written);
-		}
-		fclose($ahPipes[0]);
-		$iReturn = proc_close($hProcess);
-		if ($bfatal && $iReturn > 0)
-		{
-			fail("pgsql returned with error code ($iReturn)");
-		}
 	}
 
 	function pgsqlRunRestoreData($sDumpFile)

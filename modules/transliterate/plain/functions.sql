@@ -123,7 +123,6 @@ BEGIN
     return_word_id := nextval('seq_word');
     INSERT INTO word VALUES (return_word_id, lookup_token, null, lookup_class, lookup_type, null, 0, op);
   END IF;
-  RETURN return_word_id;
 END;
 $$
 LANGUAGE plpgsql;
@@ -166,7 +165,7 @@ DECLARE
   lookup_token TEXT;
   return_word_ids INTEGER[];
 BEGIN
-  lookup_token := ' '||make_standard_name((lookup_word);
+  lookup_token := ' '||make_standard_name(lookup_word);
   SELECT array_agg(word_id) FROM word WHERE word_token = lookup_token and class is null and type is null into return_word_ids;
   RETURN return_word_ids;
 END;
@@ -203,12 +202,12 @@ DECLARE
 BEGIN
   FOR item IN SELECT (each(src)).* LOOP
 
-    create_country_term(item.value, lookup_country_code);
+    perform create_country_term(item.value, lookup_country_code);
 
     words := regexp_split_to_array(item.value, E'[,;()]');
     IF array_upper(words, 1) != 1 THEN
       FOR j IN 1..array_upper(words, 1) LOOP
-        create_country_term(words[j], lookup_country_code);
+        perform create_country_term(words[j], lookup_country_code);
       END LOOP;
     END IF;
   END LOOP;
@@ -282,6 +281,73 @@ BEGIN
     END IF;
 
   END LOOP;
+
+  RETURN result;
+END;
+$$
+LANGUAGE plpgsql IMMUTABLE;
+
+
+CREATE OR REPLACE FUNCTION make_keywords(src TEXT) RETURNS INTEGER[]
+  AS $$
+DECLARE
+  result INTEGER[];
+  s TEXT;
+  w INTEGER;
+  words TEXT[];
+  i INTEGER;
+  j INTEGER;
+BEGIN
+  result := '{}'::INTEGER[];
+
+  s := make_standard_name(src);
+  w := getorcreate_name_id(s, src);
+
+  IF NOT (ARRAY[w] <@ result) THEN
+    result := result || w;
+  END IF;
+
+  w := getorcreate_word_id(s);
+
+  IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
+    result := result || w;
+  END IF;
+
+  words := string_to_array(s, ' ');
+  IF array_upper(words, 1) IS NOT NULL THEN
+    FOR j IN 1..array_upper(words, 1) LOOP
+      IF (words[j] != '') THEN
+        w = getorcreate_word_id(words[j]);
+        IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
+          result := result || w;
+        END IF;
+      END IF;
+    END LOOP;
+  END IF;
+
+  words := regexp_split_to_array(src, E'[,;()]');
+  IF array_upper(words, 1) != 1 THEN
+    FOR j IN 1..array_upper(words, 1) LOOP
+      s := make_standard_name(words[j]);
+      IF s != '' THEN
+        w := getorcreate_word_id(s);
+        IF w IS NOT NULL AND NOT (ARRAY[w] <@ result) THEN
+          result := result || w;
+        END IF;
+      END IF;
+    END LOOP;
+  END IF;
+
+  s := regexp_replace(src, '市$', '');
+  IF s != src THEN
+    s := make_standard_name(s);
+    IF s != '' THEN
+      w := getorcreate_name_id(s, src);
+      IF NOT (ARRAY[w] <@ result) THEN
+        result := result || w;
+      END IF;
+    END IF;
+  END IF;
 
   RETURN result;
 END;

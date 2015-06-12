@@ -25,7 +25,19 @@
 	{
 		$aPairs = array();
 
-		foreach(CONST_Tokenizer_Languages as $sLanguage)
+		$aBlacklist = explode(',', CONST_Tokenizer_TagBlacklist);
+		foreach($aBlacklist as $sKey => $sValue)
+		{
+			$aBlacklist[$sKey] = explode('|', $sValue);
+		}
+
+		$aWhitelist = explode(',', CONST_Tokenizer_TagWhitelist);
+		foreach($aWhitelist as $sKey => $sValue)
+		{
+			$aWhitelist[$sKey] = explode('|', $sValue);
+		}
+
+		foreach(explode('|', CONST_Tokenizer_Languages) as $sLanguage)
 		{
 			$sURL = 'http://wiki.openstreetmap.org/wiki/Special:Export/Nominatim/Special_Phrases/'.strtoupper($sLanguage);
 			$sWikiPageXML = file_get_contents($sURL);
@@ -46,16 +58,16 @@
 						fail("Bad class/type for language $sLanguage: $sClass=$sType");
 					}
 					# blacklisting: disallow certain class/type combinations
-					if (isset(CONST_Tokenizer_TagBlacklist[$sClass])
-					    && in_array($sType, CONST_Tokenizer_TagBlacklist[$sClass]))
+					if (isset($aBlacklist[$sClass])
+					    && in_array($sType, $aBlacklist[$sClass]))
 					{
 						# fwrite(STDERR, "Blacklisted: ".$sClass."/".$sType."\n");
 						continue;
 					}
 					# whitelisting: if class is in whitelist
 					# allow only tags in the list
-					if (isset(CONST_Tokenizer_TagWhitelist)
-					    && !in_array($sType, CONST_Tokenizer_TagWhitelist[$sClass]))
+					if (isset($aWhitelist)
+					    && !in_array($sType, $aWhitelist[$sClass]))
 					{
 						# fwrite(STDERR, "Non-Whitelisted: ".$sClass."/".$sType."\n");
 						continue;

@@ -11,34 +11,42 @@
 
 		protected $iMaxRank = 20;
 
-		static function prepareSetup(&$oDB)
+		static function prepareSetup(&$oDB, $bIgnoreErrors)
 		{
-			$sTemplate = file_get_contents(CONST_SitePath.'modules/transliterate/tables.sql');
+			$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/tables.sql');
 			$sTemplate = str_replace('{www-user}', CONST_Database_Web_User, $sTemplate);
 			$sTemplate = replace_tablespace('{ts:data}',
 					CONST_Tablespace_Search_Data, $sTemplate);
 			$sTemplate = replace_tablespace('{ts:index}',
 					CONST_Tablespace_Search_Index, $sTemplate);
-			pgsqlRunScript($sTemplate, false);
+			pgsqlRunScript($sTemplate, !$bIgnoreErrors);
 		}
 
-		static function finishSetup(&$oDB)
+		static function updateFunctions(&$oDB, $bIgnoreErrors, $bEnableDebug)
+		{
+			$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/functions.sql');
+			$sTemplate = str_replace('{modulepath}', CONST_SitePath.'/modules/transliterate', $sTemplate);
+			if ($bEnableDebug) $sTemplate = str_replace('--DEBUG:', '', $sTemplate);
+			pgsqlRunScript($sTemplate, $bIgnoreErrors);
+		}
+
+		static function finishSetup(&$oDB, $bIgnoreErrors)
 		{
 			// create indices
 			$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/indices.sql');
 			$sTemplate = replace_tablespace('{ts:index}',
 			                     CONST_Tablespace_Search_Index, $sTemplate);
-			pgsqlRunScript($sTemplate);
+			pgsqlRunScript($sTemplate, !$bIgnoreErrors);
 
 			// make sure the basic country names are available
-			pgRun($oDB, "select getorcreate_country('uk', 'gb')");
-			pgRun($oDB, "select getorcreate_country('united states', 'us')");
-			pgRun($oDB, "select count(*) from (select getorcreate_country(country_code, country_code) from country_name where country_code is not null) as x");
+			pgRun($oDB, "select create_country_term('uk', 'gb')");
+			pgRun($oDB, "select create_country_term('united states', 'us')");
+			pgRun($oDB, "select count(*) from (select create_country_term(country_code, country_code) from country_name where country_code is not null) as x");
 
-			pgRun($oDB, "select count(*) from (select getorcreate_country(get_name_by_language(country_name.name,ARRAY['name']), country_code) from country_name where get_name_by_language(country_name.name, ARRAY['name']) is not null) as x");
-			foreach(CONST_Tokenizer_Languages as $sLanguage)
+			pgRun($oDB, "select count(*) from (select create_country_term(get_name_by_language(country_name.name,ARRAY['name']), country_code) from country_name where get_name_by_language(country_name.name, ARRAY['name']) is not null) as x");
+			foreach(explode('|', CONST_Tokenizer_Languages) as $sLanguage)
 			{
-				pgRun($oDB, "select count(*) from (select getorcreate_country(get_name_by_language(country_name.name,ARRAY['name:".$sLanguage."']), country_code) from country_name where get_name_by_language(country_name.name, ARRAY['name:".$sLanguage."']) is not null) as x");
+				pgRun($oDB, "select count(*) from (select create_country_term(get_name_by_language(country_name.name,ARRAY['name:".$sLanguage."']), country_code) from country_name where get_name_by_language(country_name.name, ARRAY['name:".$sLanguage."']) is not null) as x");
 			}
 		}
 
@@ -163,8 +171,7 @@
 			$aTokens = array();
 			foreach($aPhrases as $iPhrase => $sPhrase)
 			{
-				$aPhrase  = $this->oDB->getRow("select make_standard_name('";
-				$aPhrase .= pg_escape_string($sPhrase)."') as string");
+				$aPhrase  = $this->oDB->getRow("select make_standard_name('".pg_escape_string($sPhrase)."') as string");
 				if (PEAR::isError($aPhrase))
 				{
 					userError("Illegal query string (not an UTF-8 string): ".$sPhrase);
@@ -201,7 +208,7 @@
 
 			// Check which tokens we have, get the ID numbers
 			$sSQL = 'select word_id,word_token,word,class,type,country_code,';
-			$sSQL .= 'operator,search_name_count from word where word_token in ('
+			$sSQL .= 'operator,search_name_count from word where word_token in (';
 			$sSQL .= join(',',array_map("getDBQuoted",$aRawTokens)).')';
 
 			if (CONST_Debug) var_Dump($sSQL);
