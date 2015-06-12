@@ -696,22 +696,8 @@
 	}
 
 
-	function _debugDumpGroupedSearches($aData, $aTokens)
+	function _debugDumpGroupedSearches($aData, $aWordsIDs)
 	{
-		$aWordsIDs = array();
-		if ($aTokens)
-		{
-			foreach($aTokens as $sToken => $aWords)
-			{
-				if ($aWords)
-				{
-					foreach($aWords as $aToken)
-					{
-						$aWordsIDs[$aToken['word_id']] = $sToken.'('.$aToken['word_id'].')';
-					}
-				}
-			}
-		}
 		echo "<table border=\"1\">";
 		echo "<tr><th>rank</th><th>Name Tokens</th><th>Name Not</th><th>Address Tokens</th><th>Address Not</th><th>country</th><th>operator</th><th>class</th><th>type</th><th>house#</th><th>Lat</th><th>Lon</th><th>Radius</th></tr>";
 		foreach($aData as $iRank => $aRankedSet)

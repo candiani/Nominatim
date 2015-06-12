@@ -11,11 +11,6 @@
 
 		protected $iMaxRank = 20;
 
-        function getTokens()
-        {
-            return $this->aTokens;
-        }
-
 		static function prepareSetup(&$oDB, $bIgnoreErrors)
 		{
 			$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/tables.sql');
@@ -548,12 +543,33 @@
 					$aSearches = array_merge($aSearches, $aNewSearches);
 					if ($iSearchCount > 50) break;
 				}
-
-				//if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $this->aTokens);
-
 			}
 			return $aGroupedSearches;
+		}
 
+		function getWordIds()
+		{
+			$aWordsIDs = array();
+			if ($this->aTokens)
+			{
+				foreach($this->aTokens as $sToken => $aWords)
+				{
+					if ($aWords)
+					{
+						foreach($aWords as $aToken)
+						{
+							$aWordsIDs[$aToken['word_id']] = $sToken.'('.$aToken['word_id'].')';
+						}
+					}
+				}
+			}
+
+			return $aWordsIDs;
+		}
+
+		function getWordFrequency($sWord)
+		{
+			return $this->aWordFrequencyScores[$sWord];
 		}
 
 	} // end class Tokenizer

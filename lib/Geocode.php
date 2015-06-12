@@ -658,7 +658,7 @@
 					}
 				}
 
-				if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $oWords->getTokens());
+				if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $oWords->getWordIds());
 
 				$aResultPlaceIDs = array();
 				$iGroupLoop = 0;
@@ -671,7 +671,7 @@
 						$iQueryLoop++;
 
 						if (CONST_Debug) { echo "<hr><b>Search Loop, group $iGroupLoop, loop $iQueryLoop</b>"; }
-						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getTokens());
+						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getWordIds());
 
 						// No location term?
 						if (!sizeof($aSearch['aName']) && !sizeof($aSearch['aAddress']) && !$aSearch['fLon'])
@@ -765,7 +765,7 @@
 								// For infrequent name terms disable index usage for address
 								if (CONST_Search_NameOnlySearchFrequencyThreshold &&
 										sizeof($aSearch['aName']) == 1 &&
-										$aWordFrequencyScores[$aSearch['aName'][reset($aSearch['aName'])]] < CONST_Search_NameOnlySearchFrequencyThreshold)
+										$oWords->getWordFrequency($aSearch['aName'][reset($aSearch['aName'])]) < CONST_Search_NameOnlySearchFrequencyThreshold)
 								{
 									$aTerms[] = "array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY[".join(array_merge($aSearch['aAddress'],$aSearch['aAddressNonSearch']),",")."]";
 								}
