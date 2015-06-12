@@ -3,6 +3,8 @@ PGXS := @POSTGRESQL_PGXS@
 PG_CONFIG := @PG_CONFIG@
 include $(PGXS)
 
+SITE_INSTALL := tables.sql functions.sql indices.sql compute_words.sql tokenizer.php
+
 all:
 	chmod 755 nominatim.so
 
@@ -17,5 +19,5 @@ site-install:
 	@install -d '$(SITE_MODDIR)'
 	@rm -f "$(SITE_MODDIR)/*"
 	install -t $(SITE_MODDIR) nominatim.so
-	install -t $(SITE_MODDIR) -m 644 tables.sql functions.sql indices.sql
+	install -t $(SITE_MODDIR) -m 644 $(SITE_INSTALL)
 

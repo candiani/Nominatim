@@ -467,7 +467,7 @@ BEGIN
   END IF;
 
   IF NEW.housenumber IS NOT NULL THEN
-    i := create_housenumber_id(NEW.housenumber);
+    perform create_housenumber_id(NEW.housenumber);
   END IF;
 
   IF NEW.osm_type = 'X' THEN

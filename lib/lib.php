@@ -39,6 +39,11 @@
 		exit;
 	}
 
+	function pgRun(&$oDB, $sSql)
+	{
+		if (!pg_query($oDB->connection, $sSQL)) fail(pg_last_error($oDB->connection));
+	}
+
 
 	function fail($sError, $sUserError = false)
 	{

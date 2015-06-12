@@ -269,21 +269,23 @@
 
 		echo "Tables\n";
 		$sTemplate = file_get_contents(CONST_BasePath.'/sql/tables.sql');
-		$sTemplate .= file_get_contents(CONST_SitePath.'modules/transliterate/tables.sql');
 		$sTemplate = str_replace('{www-user}', CONST_Database_Web_User, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:address-data}',
 		                                CONST_Tablespace_Address_Data, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:address-index}',
-		                                CONST_Tablespace_Address_Index, $sTemplate);
+				CONST_Tablespace_Address_Index, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:search-data}',
-		                                CONST_Tablespace_Search_Data, $sTemplate);
+				CONST_Tablespace_Search_Data, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:search-index}',
-		                                CONST_Tablespace_Search_Index, $sTemplate);
+				CONST_Tablespace_Search_Index, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:aux-data}',
-		                                CONST_Tablespace_Aux_Data, $sTemplate);
+				CONST_Tablespace_Aux_Data, $sTemplate);
 		$sTemplate = replace_tablespace('{ts:aux-index}',
-		                                CONST_Tablespace_Aux_Index, $sTemplate);
+				CONST_Tablespace_Aux_Index, $sTemplate);
 		pgsqlRunScript($sTemplate, false);
+
+		$oDB =& getDB();
+		Tokenizer::prepareSetup($oDB);
 
 		// re-run the functions
 		echo "Functions\n";
@@ -398,23 +400,23 @@
 		$bDidSomething = true;
 
 		$oDB =& getDB();
-		if (!pg_query($oDB->connection, 'TRUNCATE word')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE word');
 		echo '.';
-		if (!pg_query($oDB->connection, 'TRUNCATE placex')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE placex');
 		echo '.';
-		if (!pg_query($oDB->connection, 'TRUNCATE place_addressline')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE place_addressline');
 		echo '.';
-		if (!pg_query($oDB->connection, 'TRUNCATE place_boundingbox')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE place_boundingbox');
 		echo '.';
-		if (!pg_query($oDB->connection, 'TRUNCATE location_area')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE location_area');
 		echo '.';
-		if (!pg_query($oDB->connection, 'TRUNCATE search_name')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE search_name');
 		echo '.';
-		if (!pg_query($oDB->connection, 'TRUNCATE search_name_blank')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'TRUNCATE search_name_blank');
 		echo '.';
-		if (!pg_query($oDB->connection, 'DROP SEQUENCE seq_place')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'DROP SEQUENCE seq_place');
 		echo '.';
-		if (!pg_query($oDB->connection, 'CREATE SEQUENCE seq_place start 100000')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'CREATE SEQUENCE seq_place start 100000');
 		echo '.';
 
 		$sSQL = 'select distinct partition from country_name';
@@ -426,12 +428,12 @@
 		if (!$aCMDResult['no-partitions']) $aPartitions[] = 0;
 		foreach($aPartitions as $sPartition)
 		{
-			if (!pg_query($oDB->connection, 'TRUNCATE location_road_'.$sPartition)) fail(pg_last_error($oDB->connection));
+			pgRun($oDB, 'TRUNCATE location_road_'.$sPartition);
 			echo '.';
 		}
 
 		// used by getorcreate_word_id to ignore frequent partial words
-		if (!pg_query($oDB->connection, 'CREATE OR REPLACE FUNCTION get_maxwordfreq() RETURNS integer AS $$ SELECT '.CONST_Max_Word_Frequency.' as maxwordfreq; $$ LANGUAGE SQL IMMUTABLE')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'CREATE OR REPLACE FUNCTION get_maxwordfreq() RETURNS integer AS $$ SELECT '.CONST_Max_Word_Frequency.' as maxwordfreq; $$ LANGUAGE SQL IMMUTABLE');
 		echo ".\n";
 
 		// pre-create the word list
@@ -543,18 +545,18 @@
 	{
 		$bDidSomething = true;
 		$oDB =& getDB();
-		if (!pg_query($oDB->connection, 'DELETE from placex where osm_type=\'P\'')) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, 'DELETE from placex where osm_type=\'P\'');
 		$sSQL = "insert into placex (osm_type,osm_id,class,type,postcode,calculated_country_code,geometry) ";
 		$sSQL .= "select 'P',nextval('seq_postcodes'),'place','postcode',postcode,calculated_country_code,";
 		$sSQL .= "ST_SetSRID(ST_Point(x,y),4326) as geometry from (select calculated_country_code,postcode,";
 		$sSQL .= "avg(st_x(st_centroid(geometry))) as x,avg(st_y(st_centroid(geometry))) as y ";
 		$sSQL .= "from placex where postcode is not null group by calculated_country_code,postcode) as x";
-		if (!pg_query($oDB->connection, $sSQL)) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, $sSQL);
 
 		$sSQL = "insert into placex (osm_type,osm_id,class,type,postcode,calculated_country_code,geometry) ";
 		$sSQL .= "select 'P',nextval('seq_postcodes'),'place','postcode',postcode,'us',";
 		$sSQL .= "ST_SetSRID(ST_Point(x,y),4326) as geometry from us_postcode";
-		if (!pg_query($oDB->connection, $sSQL)) fail(pg_last_error($oDB->connection));
+		pgRun($oDB, $sSQL);
 	}
 
 	if ($aCMDResult['osmosis-init'] || $aCMDResult['all'])
@@ -644,9 +646,9 @@
 					if (!$sStateFile || strlen($sStateFile) > 1000) fail("unable to obtain state file");
 					file_put_contents(CONST_SitePath.'/state.txt', $sStateFile);
 					echo "Updating DB status\n";
-					pg_query($oDB->connection, 'TRUNCATE import_status');
+					pgRun($oDB, 'TRUNCATE import_status');
 					$sSQL = "INSERT INTO import_status VALUES('".$aRepMatch[2]."')";
-					pg_query($oDB->connection, $sSQL);
+					pgRun($oDB, $sSQL);
 				}
 				else
 				{
@@ -712,6 +714,9 @@
 		$sTemplate = replace_tablespace('{ts:aux-index}',
 		                                CONST_Tablespace_Aux_Index, $sTemplate);
 		pgsqlRunScript($sTemplate);
+
+        // and module finalizing scripts
+        Tokenizer::finishSetup($oDB);
 	}
 
 	if (isset($aCMDResult['create-website']))

@@ -9,9 +9,9 @@ CREATE TABLE word (
   country_code varchar(2),
   search_name_count INTEGER,
   operator TEXT
-  ) {ts:search-data};
+  ) {ts:data};
 
-CREATE INDEX idx_word_word_token on word USING BTREE (word_token) {ts:search-index};
+CREATE INDEX idx_word_word_token on word USING BTREE (word_token) {ts:index};
 GRANT SELECT ON word TO "{www-user}" ;
 DROP SEQUENCE IF EXISTS seq_word;
 CREATE SEQUENCE seq_word start 1;

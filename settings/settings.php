@@ -111,3 +111,23 @@
 	@define('CONST_Log_File_Format', 'TODO'); // Currently hard coded
 	@define('CONST_Log_File_SearchLog', '');
 	@define('CONST_Log_File_ReverseLog', '');
+
+    //////// Tokenizer settings
+
+	// Languages for which the tokenizer should add special localization.
+	// The kind of support depends on the tokenizer, currently this mainly
+	// concerns translation of special phrases.
+	@define('CONST_Tokenizer_Languages', array(
+	         'af', 'ar', 'br', 'ca', 'cs', 'de', 'en', 'es', 'et', 'eu',
+	         'fa', 'fi', 'fr', 'gl', 'hr', 'hu', 'ia', 'is', 'it', 'ja',
+	         'mk', 'nl', 'no', 'pl', 'ps', 'pt', 'ru', 'sk', 'sv', 'uk', 'vi'));
+	// Key/value combination which should be excluded from special phrases.
+	@define('CONST_Tokenizer_TagBlacklist', array(
+	           'boundary' => array('administrative'),
+	           'place' => array('house', 'houses')));
+	// If a class is in the white list then all types will 
+	// be ignored except the ones given in the list.
+	// Also use this list to exclude an entire class from special phrases.
+	@define('CONST_Tokenizer_TagWhitelist', array(
+	           'highway' => array('bus_stop', 'rest_area', 'raceway'),
+	           'building' => array()));

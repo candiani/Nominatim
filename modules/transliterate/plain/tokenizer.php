@@ -11,6 +11,44 @@
 
 		protected $iMaxRank = 20;
 
+		static function prepareSetup(&$oDB)
+		{
+			$sTemplate = file_get_contents(CONST_SitePath.'modules/transliterate/tables.sql');
+			$sTemplate = str_replace('{www-user}', CONST_Database_Web_User, $sTemplate);
+			$sTemplate = replace_tablespace('{ts:data}',
+					CONST_Tablespace_Search_Data, $sTemplate);
+			$sTemplate = replace_tablespace('{ts:index}',
+					CONST_Tablespace_Search_Index, $sTemplate);
+			pgsqlRunScript($sTemplate, false);
+		}
+
+		static function finishSetup(&$oDB)
+		{
+			// make sure the basic country names are available
+			pgRun($oDB, "select getorcreate_country('uk', 'gb')");
+			pgRun($oDB, "select getorcreate_country('united states', 'us')");
+			pgRun($oDB, "select count(*) from (select getorcreate_country(country_code, country_code) from country_name where country_code is not null) as x");
+
+			pgRun($oDB, "select count(*) from (select getorcreate_country(get_name_by_language(country_name.name,ARRAY['name']), country_code) from country_name where get_name_by_language(country_name.name, ARRAY['name']) is not null) as x");
+			foreach(CONST_Tokenizer_Languages as $sLanguage)
+			{
+				pgRun($oDB, "select count(*) from (select getorcreate_country(get_name_by_language(country_name.name,ARRAY['name:".$sLanguage."']), country_code) from country_name where get_name_by_language(country_name.name, ARRAY['name:".$sLanguage."']) is not null) as x");
+			}
+		}
+
+		static function createAmenitySql($sLabel, $sClass, $sType, $sOp)
+		{
+			switch($sOp)
+			{
+				case 'near':
+					return "select getorcreate_amenityoperator('".pg_escape_string($sLabel)."', '$sClass', '$sType', 'near');\n";
+				case 'in':
+					return "select getorcreate_amenityoperator('".pg_escape_string($sLabel)."', '$sClass', '$sType', 'in');\n";
+				default:
+					return "select getorcreate_amenity('".pg_escape_string($sLabel)."', '$sClass', '$sType');\n";
+			}
+		}
+
 		function Tokenizer(&$oDB, $aPhrases, $bIsStructured)
 		{
 			$this->bIsStructured = $bIsStructured;

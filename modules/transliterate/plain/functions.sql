@@ -76,9 +76,9 @@ END;
 $$
 LANGUAGE plpgsql;
 
--- public, return must be ignored
+-- public
 CREATE OR REPLACE FUNCTION create_housenumber_id(lookup_word TEXT)
-  RETURNS INTEGER
+  RETURNS VOID
   AS $$
 DECLARE
   lookup_token TEXT;
@@ -87,61 +87,37 @@ BEGIN
   lookup_token := ' '||make_standard_name(lookup_word);
   SELECT min(word_id) FROM word WHERE word_token = lookup_token and class='place' and type='house' into return_word_id;
   IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
     INSERT INTO word VALUES (return_word_id, lookup_token, null, 'place', 'house', null, 0);
   END IF;
-  RETURN return_word_id;
 END;
 $$
 LANGUAGE plpgsql;
 
---protected, todo: rewrite specialphrases.php
-CREATE OR REPLACE FUNCTION getorcreate_country(lookup_word TEXT, lookup_country_code varchar(2))
-  RETURNS INTEGER
+CREATE OR REPLACE FUNCTION create_amenity(lookup_word TEXT, lookup_class text, lookup_type text)
+  RETURNS VOID
   AS $$
 DECLARE
   lookup_token TEXT;
   return_word_id INTEGER;
 BEGIN
-  lookup_token := ' '||trim(lookup_word);
-  SELECT min(word_id) FROM word WHERE word_token = lookup_token and country_code=lookup_country_code into return_word_id;
-  IF return_word_id IS NULL THEN
-    return_word_id := nextval('seq_word');
-    INSERT INTO word VALUES (return_word_id, lookup_token, null, null, null, lookup_country_code, 0);
-  END IF;
-  RETURN return_word_id;
-END;
-$$
-LANGUAGE plpgsql;
-
---protected, todo: rewrite specialphrases.php
-CREATE OR REPLACE FUNCTION getorcreate_amenity(lookup_word TEXT, lookup_class text, lookup_type text)
-  RETURNS INTEGER
-  AS $$
-DECLARE
-  lookup_token TEXT;
-  return_word_id INTEGER;
-BEGIN
-  lookup_token := ' '||trim(lookup_word);
+  lookup_token := ' '||trim(make_standard_name(lookup_word));
   SELECT min(word_id) FROM word WHERE word_token = lookup_token and class=lookup_class and type = lookup_type into return_word_id;
   IF return_word_id IS NULL THEN
     return_word_id := nextval('seq_word');
     INSERT INTO word VALUES (return_word_id, lookup_token, null, lookup_class, lookup_type, null, 0);
   END IF;
-  RETURN return_word_id;
 END;
 $$
 LANGUAGE plpgsql;
 
---protected, todo: rewrite specialphrases.php
 CREATE OR REPLACE FUNCTION getorcreate_amenityoperator(lookup_word TEXT, lookup_class text, lookup_type text, op text)
-  RETURNS INTEGER
+  RETURNS VOID
   AS $$
 DECLARE
   lookup_token TEXT;
   return_word_id INTEGER;
 BEGIN
-  lookup_token := ' '||trim(lookup_word);
+  lookup_token := ' '||trim(make_standard_name(lookup_word));
   SELECT min(word_id) FROM word WHERE word_token = lookup_token and class=lookup_class and type = lookup_type and operator = op into return_word_id;
   IF return_word_id IS NULL THEN
     return_word_id := nextval('seq_word');
@@ -197,28 +173,42 @@ END;
 $$
 LANGUAGE plpgsql IMMUTABLE;
 
+
+CREATE OR REPLACE FUNCTION create_country_term(lookup_word TEXT, lookup_country_code varchar(2))
+  RETURNS VOID
+  AS $$
+DECLARE
+  lookup_token TEXT;
+  return_word_id INTEGER;
+BEGIN
+  lookup_token := ' '||trim(make_standard_name(lookup_word));
+  IF lookup_token != ' ' THEN
+    SELECT min(word_id) FROM word WHERE word_token = lookup_token and country_code=lookup_country_code into return_word_id;
+    IF return_word_id IS NULL THEN
+      return_word_id := nextval('seq_word');
+      INSERT INTO word VALUES (return_word_id, lookup_token, null, null, null, lookup_country_code, 0);
+    END IF;
+  END IF;
+END;
+$$
+LANGUAGE plpgsql;
+
 -- public
 CREATE OR REPLACE FUNCTION create_country(src HSTORE, lookup_country_code varchar(2)) RETURNS VOID
   AS $$
 DECLARE
-  s TEXT;
-  w INTEGER;
   words TEXT[];
   item RECORD;
   j INTEGER;
 BEGIN
   FOR item IN SELECT (each(src)).* LOOP
 
-    s := make_standard_name(item.value);
-    w := getorcreate_country(s, lookup_country_code);
+    create_country_term(item.value, lookup_country_code);
 
     words := regexp_split_to_array(item.value, E'[,;()]');
     IF array_upper(words, 1) != 1 THEN
       FOR j IN 1..array_upper(words, 1) LOOP
-        s := make_standard_name(words[j]);
-        IF s != '' THEN
-          w := getorcreate_country(s, lookup_country_code);
-        END IF;
+        create_country_term(words[j], lookup_country_code);
       END LOOP;
     END IF;
   END LOOP;
