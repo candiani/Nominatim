@@ -11,6 +11,11 @@
 
 		protected $iMaxRank = 20;
 
+        function getTokens()
+        {
+            return $this->aTokens;
+        }
+
 		static function prepareSetup(&$oDB, $bIgnoreErrors)
 		{
 			$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/tables.sql');
@@ -113,7 +118,7 @@
 
 		function getGroupedSearches($aSearches)
 		{
-			return computeSearches($aSearches, $this->aPhrases, $this->bStructuredPhrases);
+			return $this->computeSearches($aSearches, $this->aPhrases, $this->bIsStructured);
 		}
 
 		function getReverseGroupedSearches($aSearches)
@@ -129,7 +134,7 @@
 				$aPhrases[sizeof($aPhrases)-1]['wordsets'] = getInverseWordSets($aFinalPhrase['words'], 0);
 			}
 
-			return computeSearches($aSearches, $sPhrases, false);
+			return $this->computeSearches($aSearches, $sPhrases, false);
 		}
 
 		private function getWordSets($aWords, $iDepth)
@@ -141,7 +146,7 @@
 				{
 					$sWord = array_shift($aWords);
 					$sFirstToken .= ($sFirstToken?' ':'').$sWord;
-					$aRest = getWordSets($aWords, $iDepth+1);
+					$aRest = $this->getWordSets($aWords, $iDepth+1);
 					foreach($aRest as $aSet)
 					{
 						$aResult[] = array_merge(array($sFirstToken),$aSet);
@@ -221,7 +226,7 @@
 			foreach($aDatabaseWords as $aToken)
 			{
 				// Very special case - require 2 letter country param to match the country code found
-				if ($bStructuredPhrases && $aToken['country_code'] && !empty($this->aStructuredQuery['country'])
+				if ($this->bIsStructured && $aToken['country_code'] && !empty($this->aStructuredQuery['country'])
 						&& strlen($this->aStructuredQuery['country']) == 2 && strtolower($this->aStructuredQuery['country']) != $aToken['country_code'])
 				{
 					continue;
@@ -493,7 +498,7 @@
 											$aSearch['iSearchRank'] += 1;
 											if (!sizeof($aCurrentSearch['aName'])) $aSearch['iSearchRank'] += 1;
 											if (preg_match('#^[0-9]+$#', $sToken)) $aSearch['iSearchRank'] += 2;
-											if ($aWordFrequencyScores[$aSearchTerm['word_id']] < CONST_Max_Word_Frequency)
+											if ($this->aWordFrequencyScores[$aSearchTerm['word_id']] < CONST_Max_Word_Frequency)
 												$aSearch['aName'][$aSearchTerm['word_id']] = $aSearchTerm['word_id'];
 											else
 												$aSearch['aNameNonSearch'][$aSearchTerm['word_id']] = $aSearchTerm['word_id'];

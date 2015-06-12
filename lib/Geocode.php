@@ -1,5 +1,5 @@
 <?php
-	require_once(CONST_SitePath.'modules/transliterate/tokenizer.php');
+	require_once(CONST_SitePath.'/modules/transliterate/tokenizer.php');
 
 	class Geocode
 	{
@@ -596,11 +596,11 @@
 				// Commas are used to reduce the search space by indicating where phrases split
 				if ($this->aStructuredQuery)
 				{
-					$oWords =& new Tokenizer($this->aStructuredQuery, true);
+					$oWords =& new Tokenizer($this->oDB, $this->aStructuredQuery, true);
 				}
 				else
 				{
-					$oWords =& new Tokenizer(explode(',',$sQuery), false);
+					$oWords =& new Tokenizer($this->oDB, explode(',',$sQuery), false);
 				}
 
 				$aSearches = $oWords->getSpecialSearches($aSpecialTermsRaw, $aSearches);
@@ -658,7 +658,7 @@
 					}
 				}
 
-				if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $aValidTokens);
+				if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $oWords->getTokens());
 
 				$aResultPlaceIDs = array();
 				$iGroupLoop = 0;
@@ -671,7 +671,7 @@
 						$iQueryLoop++;
 
 						if (CONST_Debug) { echo "<hr><b>Search Loop, group $iGroupLoop, loop $iQueryLoop</b>"; }
-						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $aValidTokens);
+						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getTokens());
 
 						// No location term?
 						if (!sizeof($aSearch['aName']) && !sizeof($aSearch['aAddress']) && !$aSearch['fLon'])
