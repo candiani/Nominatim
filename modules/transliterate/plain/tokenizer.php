@@ -24,6 +24,12 @@
 
 		static function finishSetup(&$oDB)
 		{
+			// create indices
+			$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/indices.sql');
+			$sTemplate = replace_tablespace('{ts:index}',
+			                     CONST_Tablespace_Search_Index, $sTemplate);
+			pgsqlRunScript($sTemplate);
+
 			// make sure the basic country names are available
 			pgRun($oDB, "select getorcreate_country('uk', 'gb')");
 			pgRun($oDB, "select getorcreate_country('united states', 'us')");

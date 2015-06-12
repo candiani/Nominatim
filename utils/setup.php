@@ -706,17 +706,9 @@
 		}
 
 		pgsqlRunScript($sTemplate);
-		$sTemplate = file_get_contents(CONST_SitePath.'/modules/transliterate/indices.src.sql');
-		$sTemplate = replace_tablespace('{ts:address-index}',
-		                                CONST_Tablespace_Address_Index, $sTemplate);
-		$sTemplate = replace_tablespace('{ts:search-index}',
-		                                CONST_Tablespace_Search_Index, $sTemplate);
-		$sTemplate = replace_tablespace('{ts:aux-index}',
-		                                CONST_Tablespace_Aux_Index, $sTemplate);
-		pgsqlRunScript($sTemplate);
 
-        // and module finalizing scripts
-        Tokenizer::finishSetup($oDB);
+		// and module finalizing scripts
+		Tokenizer::finishSetup($oDB);
 	}
 
 	if (isset($aCMDResult['create-website']))
