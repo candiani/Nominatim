@@ -1,5 +1,6 @@
 <?php
 	require_once(CONST_SitePath.'/modules/transliterate/tokenizer.php');
+	require_once(CONST_BasePath.'/lib/Searches.php');
 
 	class Geocode
 	{
@@ -451,6 +452,38 @@
 			return $aSearchResults;
 		}
 
+		private function queryForClass($sClassType, $sViewbox)
+		{
+			$sSQL = 'select place_id from place_classtype_'.$sClassType.' ct';
+			if ($sCountryCodesSQL) $sSQL .= ' join placex using (place_id)';
+			$sSQL .= " where st_contains($sViewbox, ct.centroid)";
+			if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
+			if (sizeof($this->aExcludePlaceIDs))
+			{
+				$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
+			}
+			if ($sViewboxCentreSQL) $sSQL .= " order by st_distance($sViewboxCentreSQL, ct.centroid) asc";
+			$sSQL .= " limit $this->iLimit";
+			if (CONST_Debug) var_dump($sSQL);
+
+			return $this->oDB->getCol($sSQL);
+		}
+
+		private function queryForHousenumber($sHouseNumber, $sTable, $sPlaceIDs)
+		{
+			$sHouseNumberRegex = '\\\\m'.$aSearch->getHouseNumber().'\\\\M';
+			$sSQL = 'select place_id from '.$sTable;
+			$sSQL.= ' where parent_place_id in ('.$sPlaceIDs.')';
+			$sSQL.= "and make_standard_ref(housenumber) ~* E'";
+			$sSQL.= '\\\\m'.pg_escape_string($sHouseNumber).'\\\\M'."'";
+			if (sizeof($this->aExcludePlaceIDs))
+			{
+				$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
+			}
+			$sSQL .= " limit $this->iLimit";
+			if (CONST_Debug) var_dump($sSQL);
+			return $this->oDB->getCol($sSQL);
+		}
 
 		/* Perform the actual query lookup.
 
@@ -554,27 +587,24 @@
 			// Do we have anything that looks like a lat/lon pair?
 			if ( $aLooksLike = looksLikeLatLonPair($sQuery) ){
 				$this->setNearPoint(array($aLooksLike['lat'], $aLooksLike['lon']));
-				$sQuery = $aLooksLike['query'];			
+				$sQuery = $aLooksLike['query'];
 			}
 
 			$aSearchResults = array();
 			if ($sQuery || $this->aStructuredQuery)
 			{
 				// Start with a blank search
-				$aSearches = array(
-					array('iSearchRank' => 0, 'iNamePhrase' => -1, 'sCountryCode' => false, 'aName'=>array(), 'aAddress'=>array(), 'aFullNameAddress'=>array(),
-					      'aNameNonSearch'=>array(), 'aAddressNonSearch'=>array(),
-					      'sOperator'=>'', 'aFeatureName' => array(), 'sClass'=>'', 'sType'=>'', 'sHouseNumber'=>'', 'fLat'=>'', 'fLon'=>'', 'fRadius'=>'')
-				);
+				$aSearches = array(new SearchDescription());
 
 				// Do we have a radius search?
-				$sNearPointSQL = false;
 				if ($this->aNearPoint)
 				{
 					$sNearPointSQL = "ST_SetSRID(ST_Point(".(float)$this->aNearPoint[1].",".(float)$this->aNearPoint[0]."),4326)";
-					$aSearches[0]['fLat'] = (float)$this->aNearPoint[0];
-					$aSearches[0]['fLon'] = (float)$this->aNearPoint[1];
-					$aSearches[0]['fRadius'] = (float)$this->aNearPoint[2];
+					$aSearches[0]->setNearPoint($this->aNearPoint);
+				}
+				else
+				{
+					$sNearPointSQL = false;
 				}
 
 				// currently disabled: 'special' terms in the search
@@ -613,12 +643,13 @@
 					{
 						$aReverseGroupedSearches = $oWords->getReverseGroupedSearches($aSearches);
 
-						foreach($aGroupedSearches as $aSearches)
+						foreach($aGroupedSearches as $iGroup => $aSearches)
 						{
+							if (!isset($aReverseGroupedSearches[$iGroup]))
+								$aReverseGroupedSearches[$iGroup] = array();
 							foreach($aSearches as $aSearch)
 							{
-								if (!isset($aReverseGroupedSearches[$aSearch['iSearchRank']])) $aReverseGroupedSearches[$aSearch['iSearchRank']] = array();
-								$aReverseGroupedSearches[$aSearch['iSearchRank']][] = $aSearch;
+								$aReverseGroupedSearches[$iGroup][] = $aSearch;
 							}
 						}
 
@@ -631,8 +662,9 @@
 					$aGroupedSearches = array();
 					foreach($aSearches as $aSearch)
 					{
-						if (!isset($aGroupedSearches[$aSearch['iSearchRank']])) $aGroupedSearches[$aSearch['iSearchRank']] = array();
-						$aGroupedSearches[$aSearch['iSearchRank']][] = $aSearch;
+						$iRank = $aSearch->getSearchRank();
+						if (!isset($aGroupedSearches[$iRank])) $aGroupedSearches[$iRank] = array();
+						$aGroupedSearches[$iRank][] = $aSearch;
 					}
 					ksort($aGroupedSearches);
 				}
@@ -674,9 +706,9 @@
 						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getWordIds());
 
 						// No location term?
-						if (!sizeof($aSearch['aName']) && !sizeof($aSearch['aAddress']) && !$aSearch['fLon'])
+						if (!$aSearch->hasLocationTerm())
 						{
-							if ($aSearch['sCountryCode'] && !$aSearch['sClass'] && !$aSearch['sHouseNumber'])
+							if ($aSearch->isCountrySearch())
 							{
 								// Just looking for a country by code - look it up
 								if (4 >= $this->iMinAddressRank && 4 <= $this->iMaxAddressRank)
@@ -696,43 +728,25 @@
 							}
 							else
 							{
-								if (!$bBoundingBoxSearch && !$aSearch['fLon']) continue;
-								if (!$aSearch['sClass']) continue;
-								$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch['sClass']."_".$aSearch['sType']."'";
+								if (!$bBoundingBoxSearch && !$aSearch->hasNearPoint()) continue;
+								if (!$aSearch->hasClass()) continue;
+								// class search
+								$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
 								if ($this->oDB->getOne($sSQL))
 								{
-									$sSQL = "select place_id from place_classtype_".$aSearch['sClass']."_".$aSearch['sType']." ct";
-									if ($sCountryCodesSQL) $sSQL .= " join placex using (place_id)";
-									$sSQL .= " where st_contains($this->sViewboxSmallSQL, ct.centroid)";
-									if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
-									if (sizeof($this->aExcludePlaceIDs))
-									{
-										$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-									}
-									if ($sViewboxCentreSQL) $sSQL .= " order by st_distance($sViewboxCentreSQL, ct.centroid) asc";
-									$sSQL .= " limit $this->iLimit";
-									if (CONST_Debug) var_dump($sSQL);
-									$aPlaceIDs = $this->oDB->getCol($sSQL);
-
+									$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxSmallSQL);
 									// If excluded place IDs are given, it is fair to assume that
 									// there have been results in the small box, so no further
 									// expansion in that case.
 									// Also don't expand if bounded results were requested.
 									if (!sizeof($aPlaceIDs) && !sizeof($this->aExcludePlaceIDs) && !$this->bBoundedSearch)
 									{
-										$sSQL = "select place_id from place_classtype_".$aSearch['sClass']."_".$aSearch['sType']." ct";
-										if ($sCountryCodesSQL) $sSQL .= " join placex using (place_id)";
-										$sSQL .= " where st_contains($this->sViewboxLargeSQL, ct.centroid)";
-										if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
-										if ($sViewboxCentreSQL) $sSQL .= " order by st_distance($sViewboxCentreSQL, ct.centroid) asc";
-										$sSQL .= " limit $this->iLimit";
-										if (CONST_Debug) var_dump($sSQL);
-										$aPlaceIDs = $this->oDB->getCol($sSQL);
+										$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxLargeSQL);
 									}
 								}
 								else
 								{
-									$sSQL = "select place_id from placex where class='".$aSearch['sClass']."' and type='".$aSearch['sType']."'";
+									$sSQL = "select place_id from placex where class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
 									$sSQL .= " and st_contains($this->sViewboxSmallSQL, geometry) and linked_place_id is null";
 									if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
 									if ($sViewboxCentreSQL)	$sSQL .= " order by st_distance($sViewboxCentreSQL, centroid) asc";
@@ -750,33 +764,33 @@
 							$aTerms = array();
 							$aOrder = array();
 
-							if ($aSearch['sHouseNumber'] && sizeof($aSearch['aAddress']))
+							if ($aSearch->isHouseNumberSearch())
 							{
-								$sHouseNumberRegex = '\\\\m'.$aSearch['sHouseNumber'].'\\\\M';
-								$aOrder[] = "exists(select place_id from placex where parent_place_id = search_name.place_id and transliteration(housenumber) ~* E'".$sHouseNumberRegex."' limit 1) desc";
+								$sHouseNumberRegex = '\\\\m'.$aSearch->getHouseNumber().'\\\\M';
+								$aOrder[] = "exists(select place_id from placex where parent_place_id = search_name.place_id and make_standard_ref(housenumber) ~* E'".$sHouseNumberRegex."' limit 1) desc";
 							}
 
 							// TODO: filter out the pointless search terms (2 letter name tokens and less)
 							// they might be right - but they are just too darned expensive to run
-							if (sizeof($aSearch['aName'])) $aTerms[] = "name_vector @> ARRAY[".join($aSearch['aName'],",")."]";
-							if (sizeof($aSearch['aNameNonSearch'])) $aTerms[] = "array_cat(name_vector,ARRAY[]::integer[]) @> ARRAY[".join($aSearch['aNameNonSearch'],",")."]";
-							if (sizeof($aSearch['aAddress']) && $aSearch['aName'] != $aSearch['aAddress'])
+							if ($aSearch->numNames()) $aTerms[] = 'name_vector @> ARRAY['.$aSearch->getNameList().']';
+							if ($aSearch->hasNonNames()) $aTerms[] = 'array_cat(name_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getNonNameList().']';
+							if ($aSearch->hasAddress())
 							{
 								// For infrequent name terms disable index usage for address
 								if (CONST_Search_NameOnlySearchFrequencyThreshold &&
-										sizeof($aSearch['aName']) == 1 &&
-										$oWords->getWordFrequency($aSearch['aName'][reset($aSearch['aName'])]) < CONST_Search_NameOnlySearchFrequencyThreshold)
+										$aSearch->numNames() == 1 &&
+										$oWords->getWordFrequency($aSearch->getFirstName()) < CONST_Search_NameOnlySearchFrequencyThreshold)
 								{
-									$aTerms[] = "array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY[".join(array_merge($aSearch['aAddress'],$aSearch['aAddressNonSearch']),",")."]";
+									$aTerms[] = 'array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getFullAddressList().']';
 								}
 								else
 								{
-									$aTerms[] = "nameaddress_vector @> ARRAY[".join($aSearch['aAddress'],",")."]";
-									if (sizeof($aSearch['aAddressNonSearch'])) $aTerms[] = "array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY[".join($aSearch['aAddressNonSearch'],",")."]";
+									$aTerms[] = 'nameaddress_vector @> ARRAY['.$aSearch->getAddressList().']';
+									if ($aSearch->hasNonAddress()) $aTerms[] = 'array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getNonAddressList().']';
 								}
 							}
-							if ($aSearch['sCountryCode']) $aTerms[] = "country_code = '".pg_escape_string($aSearch['sCountryCode'])."'";
-							if ($aSearch['sHouseNumber'])
+							if ($aSearch->hasCountryCode()) $aTerms[] = "country_code = '".pg_escape_string($aSearch->getCountryCode())."'";
+							if ($aSearch->hasHouseNumber())
 							{
 								$aTerms[] = "address_rank between 16 and 27";
 							}
@@ -791,10 +805,10 @@
 									$aTerms[] = "address_rank <= ".$this->iMaxAddressRank;
 								}
 							}
-							if ($aSearch['fLon'] && $aSearch['fLat'])
+							if ($aSearch->hasNearPoint())
 							{
-								$aTerms[] = "ST_DWithin(centroid, ST_SetSRID(ST_Point(".$aSearch['fLon'].",".$aSearch['fLat']."),4326), ".$aSearch['fRadius'].")";
-								$aOrder[] = "ST_Distance(centroid, ST_SetSRID(ST_Point(".$aSearch['fLon'].",".$aSearch['fLat']."),4326)) ASC";
+								$aTerms[] = 'ST_DWithin(centroid,'.$sNearPointSQL.','.$aSearch->getRadius().')';
+								$aOrder[] = 'ST_Distance(centroid,'.$sNearPointSQL.') ASC';
 							}
 							if (sizeof($this->aExcludePlaceIDs))
 							{
@@ -806,9 +820,9 @@
 							}
 
 							if ($bBoundingBoxSearch) $aTerms[] = "centroid && $this->sViewboxSmallSQL";
-							if ($sNearPointSQL) $aOrder[] = "ST_Distance($sNearPointSQL, centroid) asc";
+							//if ($sNearPointSQL) $aOrder[] = "ST_Distance($sNearPointSQL, centroid) asc";
 
-							if ($aSearch['sHouseNumber'])
+							if ($aSearch->hasHouseNumber())
 							{
 								$sImportanceSQL = '- abs(26 - address_rank) + 3';
 							}
@@ -820,9 +834,9 @@
 							if ($this->sViewboxLargeSQL) $sImportanceSQL .= " * case when ST_Contains($this->sViewboxLargeSQL, centroid) THEN 1 ELSE 0.5 END";
 
 							$aOrder[] = "$sImportanceSQL DESC";
-							if (sizeof($aSearch['aFullNameAddress']))
+							if ($aSearch->hasFullNameAddress())
 							{
-								$sExactMatchSQL = '(select count(*) from (select unnest(ARRAY['.join($aSearch['aFullNameAddress'],",").']) INTERSECT select unnest(nameaddress_vector))s) as exactmatch';
+								$sExactMatchSQL = '(select count(*) from (select unnest(ARRAY['.$aSearch->getFullNameList().']) INTERSECT select unnest(nameaddress_vector))s) as exactmatch';
 								$aOrder[] = 'exactmatch DESC';
 							} else {
 								$sExactMatchSQL = '0::int as exactmatch';
@@ -835,9 +849,9 @@
 								$sSQL .= " from search_name";
 								$sSQL .= " where ".join(' and ',$aTerms);
 								$sSQL .= " order by ".join(', ',$aOrder);
-								if ($aSearch['sHouseNumber'] || $aSearch['sClass'])
+								if ($aSearch->hasHouseNumber() || $aSearch->hasClass())
 									$sSQL .= " limit 20";
-								elseif (!sizeof($aSearch['aName']) && !sizeof($aSearch['aAddress']) && $aSearch['sClass'])
+								elseif ($aSearch->numNames() == 0 && !$aSearch->hasAddress() && $aSearch->hasClass())
 									$sSQL .= " limit 1";
 								else
 									$sSQL .= " limit ".$this->iLimit;
@@ -854,85 +868,67 @@
 								$bViewBoxMatch = false;
 								foreach($aViewBoxPlaceIDs as $aViewBoxRow)
 								{
-									//if ($bViewBoxMatch == 1 && $aViewBoxRow['in_small'] == 'f') break;
-									//if ($bViewBoxMatch == 2 && $aViewBoxRow['in_large'] == 'f') break;
-									//if ($aViewBoxRow['in_small'] == 't') $bViewBoxMatch = 1;
-									//else if ($aViewBoxRow['in_large'] == 't') $bViewBoxMatch = 2;
 									$aPlaceIDs[] = $aViewBoxRow['place_id'];
 									$this->exactMatchCache[$aViewBoxRow['place_id']] = $aViewBoxRow['exactmatch'];
 								}
 							}
-							//var_Dump($aPlaceIDs);
-							//exit;
 
-							if ($aSearch['sHouseNumber'] && sizeof($aPlaceIDs))
+							if ($aSearch->hasHouseNumber() && sizeof($aPlaceIDs))
 							{
 								$aRoadPlaceIDs = $aPlaceIDs;
 								$sPlaceIDs = join(',',$aPlaceIDs);
+								$sHouseNumberSQL = pg_escape_string($aSearch->getHouseNumber());
 
 								// Now they are indexed look for a house attached to a street we found
-								$sHouseNumberRegex = '\\\\m'.$aSearch['sHouseNumber'].'\\\\M';
-								$sSQL = "select place_id from placex where parent_place_id in (".$sPlaceIDs.") and transliteration(housenumber) ~* E'".$sHouseNumberRegex."'";
-								if (sizeof($this->aExcludePlaceIDs))
-								{
-									$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-								}
-								$sSQL .= " limit $this->iLimit";
-								if (CONST_Debug) var_dump($sSQL);
-								$aPlaceIDs = $this->oDB->getCol($sSQL);
+								$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
+								                                 'placex', $sPlaceIDs);
 
 								// If not try the aux fallback table
 								if (!sizeof($aPlaceIDs))
 								{
-									$sSQL = "select place_id from location_property_aux where parent_place_id in (".$sPlaceIDs.") and housenumber = '".pg_escape_string($aSearch['sHouseNumber'])."'";
-									if (sizeof($this->aExcludePlaceIDs))
-									{
-										$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-									}
-									//$sSQL .= " limit $this->iLimit";
-									if (CONST_Debug) var_dump($sSQL);
-									$aPlaceIDs = $this->oDB->getCol($sSQL);
+									$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
+									                                 'location_property_aux',
+									                                 $sPlaceIDs);
 								}
 
-								if (!sizeof($aPlaceIDs))
+								// And fall back to tiger data for the us
+								if (!sizeof($aPlaceIDs)
+								    && (!$aSearch->hasCountryCode() ||
+								        $aSearch->getCountryCode() == 'us'))
 								{
-									$sSQL = "select place_id from location_property_tiger where parent_place_id in (".$sPlaceIDs.") and housenumber = '".pg_escape_string($aSearch['sHouseNumber'])."'";
-									if (sizeof($this->aExcludePlaceIDs))
-									{
-										$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-									}
-									//$sSQL .= " limit $this->iLimit";
-									if (CONST_Debug) var_dump($sSQL);
-									$aPlaceIDs = $this->oDB->getCol($sSQL);
+									$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
+									                                 'location_property_tiger',
+									                                 $sPlaceIDs);
 								}
 
 								// Fallback to the road
-								if (!sizeof($aPlaceIDs) && preg_match('/[0-9]+/', $aSearch['sHouseNumber']))
+								if (!sizeof($aPlaceIDs)
+								    && preg_match('/[0-9]+/', $aSearch->getHouseNumber()))
 								{
 									$aPlaceIDs = $aRoadPlaceIDs;
 								}
-
 							}
 
-							if ($aSearch['sClass'] && sizeof($aPlaceIDs))
+							if ($aSearch->hasClass() && sizeof($aPlaceIDs))
 							{
 								$sPlaceIDs = join(',',$aPlaceIDs);
 								$aClassPlaceIDs = array();
 
-								if (!$aSearch['sOperator'] || $aSearch['sOperator'] == 'name')
+								if ($aSearch->hasOperator('name'))
 								{
-									// If they were searching for a named class (i.e. 'Kings Head pub') then we might have an extra match
-									$sSQL = "select place_id from placex where place_id in ($sPlaceIDs) and class='".$aSearch['sClass']."' and type='".$aSearch['sType']."'";
-									$sSQL .= " and linked_place_id is null";
+									// If they were searching for a named class (i.e. 'Kings Head pub')
+									// then we might have an extra match
+									$sSQL = "select place_id from placex where place_id in ($sPlaceIDs) and class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
+									$sSQL .= ' and linked_place_id is null';
 									if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
 									$sSQL .= " order by rank_search asc limit $this->iLimit";
 									if (CONST_Debug) var_dump($sSQL);
 									$aClassPlaceIDs = $this->oDB->getCol($sSQL);
 								}
 
-								if (!$aSearch['sOperator'] || $aSearch['sOperator'] == 'near') // & in
+								if ($aSearch->hasOperator('near')) // & in
 								{
-									$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch['sClass']."_".$aSearch['sType']."'";
+									$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
 									$bCacheTable = $this->oDB->getOne($sSQL);
 
 									$sSQL = "select min(rank_search) from placex where place_id in ($sPlaceIDs)";
@@ -977,7 +973,7 @@
 											else if ($sPlaceIDs) $sOrderBySQL = "ST_Distance(l.centroid, f.geometry)";
 											else if ($sPlaceGeom) $sOrderBysSQL = "ST_Distance(st_centroid('".$sPlaceGeom."'), l.centroid)";
 
-											$sSQL = "select distinct l.place_id".($sOrderBySQL?','.$sOrderBySQL:'')." from place_classtype_".$aSearch['sClass']."_".$aSearch['sType']." as l";
+											$sSQL = "select distinct l.place_id".($sOrderBySQL?','.$sOrderBySQL:'').' from place_classtype_'.$aSearch->getClassType().' as l';
 											if ($sCountryCodesSQL) $sSQL .= " join placex as lp using (place_id)";
 											if ($sPlaceIDs)
 											{
@@ -1002,7 +998,7 @@
 										}
 										else
 										{
-											if (isset($aSearch['fRadius']) && $aSearch['fRadius']) $fRange = $aSearch['fRadius'];
+											if ($aSearch->hasRadius()) $fRange = $aSearch->getRadius();
 
 											$sOrderBySQL = '';
 											if ($sNearPointSQL) $sOrderBySQL = "ST_Distance($sNearPointSQL, l.geometry)";
@@ -1010,7 +1006,7 @@
 
 											$sSQL = "select distinct l.place_id".($sOrderBysSQL?','.$sOrderBysSQL:'')." from placex as l,placex as f where ";
 											$sSQL .= "f.place_id in ( $sPlaceIDs) and ST_DWithin(l.geometry, f.centroid, $fRange) ";
-											$sSQL .= "and l.class='".$aSearch['sClass']."' and l.type='".$aSearch['sType']."' ";
+											$sSQL .= "and l.class='".$aSearch->getClass()."' and l.type='".$aSearch->getType()."' ";
 											if (sizeof($this->aExcludePlaceIDs))
 											{
 												$sSQL .= " and l.place_id not in (".join(',',$this->aExcludePlaceIDs).")";

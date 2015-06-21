@@ -97,6 +97,7 @@
 
 	@define('CONST_Search_BatchMode', false);
 
+	@define('CONST_MaxSearchDepth', 20);
 	@define('CONST_Search_TryDroppedAddressTerms', false);
 	@define('CONST_Search_NameOnlySearchFrequencyThreshold', 500);
 
