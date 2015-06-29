@@ -26,7 +26,7 @@
 		protected $iOffset = 0;
 		protected $bFallback = false;
 
-		protected $aCountryCodes = false;
+		protected $sCountryCodesSQL = false;
 		protected $aNearPoint = false;
 
 		protected $bBoundedSearch = false;
@@ -198,7 +198,7 @@
 
 		function setCountryCodesList($aCountryCodes)
 		{
-			$this->aCountryCodes = $aCountryCodes;
+			$this->sCountryCodesSQL = join(',', array_map('addQuotes', $aCountryCodes));
 		}
 
 		function setQuery($sQueryString)
@@ -253,7 +253,7 @@
 						$aCountryCodes[] = strtolower($sCountryCode);
 					}
 				}
-				$this->aCountryCodes = $aCountryCodes;
+				$this->setCountryCodesList($aCountryCodes);
 			}
 
 			if (isset($aParams['viewboxlbrt']) && $aParams['viewboxlbrt'])
@@ -452,12 +452,17 @@
 			return $aSearchResults;
 		}
 
+		private function sqlCountryCodes()
+		{
+			return " and calculated_country_code in ($this->sCountryCodesSQL)";
+		}
+
 		private function queryForClass($sClassType, $sViewbox)
 		{
 			$sSQL = 'select place_id from place_classtype_'.$sClassType.' ct';
-			if ($sCountryCodesSQL) $sSQL .= ' join placex using (place_id)';
+			if ($this->sCountryCodesSQL) $sSQL .= ' join placex using (place_id)';
 			$sSQL .= " where st_contains($sViewbox, ct.centroid)";
-			if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
+			if ($this->sCountryCodesSQL) $sSQL .= $this->sqlCountryCodes();
 			if (sizeof($this->aExcludePlaceIDs))
 			{
 				$sSQL .= " and place_id not in (".join(',',$this->aExcludePlaceIDs).")";
@@ -471,7 +476,6 @@
 
 		private function queryForHousenumber($sHouseNumber, $sTable, $sPlaceIDs)
 		{
-			$sHouseNumberRegex = '\\\\m'.$aSearch->getHouseNumber().'\\\\M';
 			$sSQL = 'select place_id from '.$sTable;
 			$sSQL.= ' where parent_place_id in ('.$sPlaceIDs.')';
 			$sSQL.= "and make_standard_ref(housenumber) ~* E'";
@@ -483,6 +487,335 @@
 			$sSQL .= " limit $this->iLimit";
 			if (CONST_Debug) var_dump($sSQL);
 			return $this->oDB->getCol($sSQL);
+		}
+
+		private function executeSingleSearch($aSearch, $bBoundingBoxSearch)
+		{
+			if (!$aSearch->hasLocationTerm())
+			{
+				if ($aSearch->isCountrySearch())
+				{
+					// Just looking for a country by code - look it up
+					if (4 >= $this->iMinAddressRank && 4 <= $this->iMaxAddressRank)
+					{
+						$sSQL = "select place_id from placex where calculated_country_code='".$aSearch->getCountryCode()."' and rank_search = 4";
+						if ($this->sCountryCodesSQL) $sSQL .= $this->sqlCountryCodes();
+						if ($bBoundingBoxSearch)
+							$sSQL .= " and _st_intersects($this->sViewboxSmallSQL, geometry)";
+						$sSQL .= " order by st_area(geometry) desc limit 1";
+						if (CONST_Debug) var_dump($sSQL);
+						$aPlaceIDs = $this->oDB->getCol($sSQL);
+					}
+					else
+					{
+						$aPlaceIDs = array();
+					}
+				}
+				else
+				{
+					if (!$bBoundingBoxSearch) return array();
+					if (!$aSearch->hasClass()) return array();
+					// class search
+					$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
+					if ($this->oDB->getOne($sSQL))
+					{
+						$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxSmallSQL);
+						// If excluded place IDs are given, it is fair to assume that
+						// there have been results in the small box, so no further
+						// expansion in that case.
+						// Also don't expand if bounded results were requested.
+						if (!sizeof($aPlaceIDs) && !sizeof($this->aExcludePlaceIDs) && !$this->bBoundedSearch)
+						{
+							$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxLargeSQL);
+						}
+					}
+					else
+					{
+						$sSQL = "select place_id from placex where class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
+						$sSQL .= " and st_contains($this->sViewboxSmallSQL, geometry) and linked_place_id is null";
+						if ($this->sCountryCodesSQL) $sSQL .= $this->sqlCountryCodes();
+						if ($sViewboxCentreSQL)	$sSQL .= " order by st_distance($sViewboxCentreSQL, centroid) asc";
+						$sSQL .= " limit $this->iLimit";
+						if (CONST_Debug) var_dump($sSQL);
+						$aPlaceIDs = $this->oDB->getCol($sSQL);
+					}
+				}
+			}
+			else
+			{
+				$aPlaceIDs = array();
+
+				// First we need a position, either aName or fLat or both
+				$aTerms = array();
+				$aOrder = array();
+
+				if ($aSearch->isHouseNumberSearch())
+				{
+					$sHouseNumberRegex = '\\\\m'.pg_escape_string($aSearch->getHouseNumber()).'\\\\M';
+					$aOrder[] = "exists(select place_id from placex where parent_place_id = search_name.place_id and make_standard_ref(housenumber) ~* E'".$sHouseNumberRegex."' limit 1) desc";
+				}
+
+				if ($aSearch->hasTokens(TokenType::Name))
+				{
+					$aTerms[] = 'name_vector @> ARRAY['.$aSearch->getTokenList(TokenType::Name).']';
+				}
+				if ($aSearch->hasTokens(TokenType::NonName))
+				{
+					$aTerms[] = 'array_cat(name_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getTokenList(TokenType::NonName).']';
+				}
+				if ($aSearch->hasTokens(TokenType::Address))
+				{
+					// For infrequent name terms disable index usage for address
+					if (CONST_Search_NameOnlySearchFrequencyThreshold &&
+							sizeof($aSearch->getTokens(TokenType::Name)) == 1 &&
+							$oWords->getWordFrequency($aSearch->getFirstName()) < CONST_Search_NameOnlySearchFrequencyThreshold)
+					{
+						$aTerms[] = 'array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY['.join(',', array_merge($aSearch->getTokens(TokenType::Address), $aSearch->getTokens(TokenType::NonAddress))).']';
+					}
+					else
+					{
+						$aTerms[] = 'nameaddress_vector @> ARRAY['.$aSearch->getTokenList(TokenType::Address).']';
+						if ($aSearch->hasTokens(TokenType::NonAddress)) $aTerms[] = 'array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getTokenList(TokenType::NonAddress).']';
+					}
+				}
+				if ($aSearch->hasCountryCode()) $aTerms[] = "country_code = '".pg_escape_string($aSearch->getCountryCode())."'";
+				if ($aSearch->hasHouseNumber())
+				{
+					$aTerms[] = "address_rank between 16 and 27";
+				}
+				else
+				{
+					if ($this->iMinAddressRank > 0)
+					{
+						$aTerms[] = "address_rank >= ".$this->iMinAddressRank;
+					}
+					if ($this->iMaxAddressRank < 30)
+					{
+						$aTerms[] = "address_rank <= ".$this->iMaxAddressRank;
+					}
+				}
+				if ($aSearch->hasNearPoint())
+				{
+					$aTerms[] = 'ST_DWithin(centroid,'.$aSearch->sqlNearPoint().','.$aSearch->getRadius().')';
+					$aOrder[] = 'ST_Distance(centroid,'.$aSearch->sqlNearPoint().') ASC';
+				}
+				if (sizeof($this->aExcludePlaceIDs))
+				{
+					$aTerms[] = "place_id not in (".join(',',$this->aExcludePlaceIDs).")";
+				}
+				if ($this->sCountryCodesSQL)
+				{
+					$aTerms[] = "country_code in ($this->sCountryCodesSQL)";
+				}
+
+				if ($bBoundingBoxSearch) $aTerms[] = "centroid && $this->sViewboxSmallSQL";
+
+				if ($aSearch->hasHouseNumber())
+				{
+					$sImportanceSQL = '- abs(26 - address_rank) + 3';
+				}
+				else
+				{
+					$sImportanceSQL = '(case when importance = 0 OR importance IS NULL then 0.75-(search_rank::float/40) else importance end)';
+				}
+				if ($this->sViewboxSmallSQL) $sImportanceSQL .= " * case when ST_Contains($this->sViewboxSmallSQL, centroid) THEN 1 ELSE 0.5 END";
+				if ($this->sViewboxLargeSQL) $sImportanceSQL .= " * case when ST_Contains($this->sViewboxLargeSQL, centroid) THEN 1 ELSE 0.5 END";
+
+				$aOrder[] = "$sImportanceSQL DESC";
+				if ($aSearch->hasTokens(TokenType::Full))
+				{
+					$sExactMatchSQL = '(select count(*) from (select unnest(ARRAY['.$aSearch->getTokenList(TokenType::Full).']) INTERSECT select unnest(nameaddress_vector))s) as exactmatch';
+					$aOrder[] = 'exactmatch DESC';
+				} else {
+					$sExactMatchSQL = '0::int as exactmatch';
+				}
+
+				if (sizeof($aTerms))
+				{
+					$sSQL = "select place_id, ";
+					$sSQL .= $sExactMatchSQL;
+					$sSQL .= " from search_name";
+					$sSQL .= " where ".join(' and ',$aTerms);
+					$sSQL .= " order by ".join(', ',$aOrder);
+					if ($aSearch->hasHouseNumber() || $aSearch->hasClass())
+						$sSQL .= " limit 20";
+					elseif (!$aSearch->hasTokens(TokenType::Name) && !$aSearch->hasTokens(TokenType::Address) && $aSearch->hasClass())
+						$sSQL .= " limit 1";
+					else
+						$sSQL .= " limit ".$this->iLimit;
+
+					if (CONST_Debug) { var_dump($sSQL); }
+					$aViewBoxPlaceIDs = $this->oDB->getAll($sSQL);
+					if (PEAR::IsError($aViewBoxPlaceIDs))
+					{
+						failInternalError("Could not get places for search terms.", $sSQL, $aViewBoxPlaceIDs);
+					}
+					//var_dump($aViewBoxPlaceIDs);
+					// Did we have an viewbox matches?
+					$aPlaceIDs = array();
+					$bViewBoxMatch = false;
+					foreach($aViewBoxPlaceIDs as $aViewBoxRow)
+					{
+						$aPlaceIDs[] = $aViewBoxRow['place_id'];
+						$this->exactMatchCache[$aViewBoxRow['place_id']] = $aViewBoxRow['exactmatch'];
+					}
+				}
+
+				if ($aSearch->hasHouseNumber() && sizeof($aPlaceIDs))
+				{
+					$aRoadPlaceIDs = $aPlaceIDs;
+					$sPlaceIDs = join(',',$aPlaceIDs);
+					$sHouseNumberSQL = pg_escape_string($aSearch->getHouseNumber());
+
+					// Now they are indexed look for a house attached to a street we found
+					$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
+					                                 'placex', $sPlaceIDs);
+
+					// If not try the aux fallback table
+					if (!sizeof($aPlaceIDs))
+					{
+						$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
+						                                 'location_property_aux',
+						                                 $sPlaceIDs);
+					}
+
+					// And fall back to tiger data for the us
+					if (!sizeof($aPlaceIDs)
+						&& (!$aSearch->hasCountryCode() ||
+							$aSearch->getCountryCode() == 'us'))
+					{
+						$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
+						                                 'location_property_tiger',
+						                                 $sPlaceIDs);
+					}
+
+					// Fallback to the road
+					if (!sizeof($aPlaceIDs)
+						&& preg_match('/[0-9]+/', $aSearch->getHouseNumber()))
+					{
+						$aPlaceIDs = $aRoadPlaceIDs;
+					}
+				}
+
+				if ($aSearch->hasClass() && sizeof($aPlaceIDs))
+				{
+					$sPlaceIDs = join(',',$aPlaceIDs);
+					$aClassPlaceIDs = array();
+
+					if ($aSearch->hasOperator('name'))
+					{
+						// If they were searching for a named class (i.e. 'Kings Head pub')
+						// then we might have an extra match
+						$sSQL = "select place_id from placex where place_id in ($sPlaceIDs) and class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
+						$sSQL .= ' and linked_place_id is null';
+						if ($this->sCountryCodesSQL) $sSQL .= $this->sqlCountryCodes();
+						$sSQL .= " order by rank_search asc limit $this->iLimit";
+						if (CONST_Debug) var_dump($sSQL);
+						$aClassPlaceIDs = $this->oDB->getCol($sSQL);
+					}
+
+					if ($aSearch->hasOperator('near')) // & in
+					{
+						$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
+						$bCacheTable = $this->oDB->getOne($sSQL);
+
+						$sSQL = "select min(rank_search) from placex where place_id in ($sPlaceIDs)";
+
+						if (CONST_Debug) var_dump($sSQL);
+						$iMaxRank = ((int)$this->oDB->getOne($sSQL));
+
+						// For state / country level searches the normal radius search doesn't work very well
+						$sPlaceGeom = false;
+						if ($iMaxRank < 9 && $bCacheTable)
+						{
+							// Try and get a polygon to search in instead
+							$sSQL = "select geometry from placex where place_id in ($sPlaceIDs) and rank_search < $iMaxRank + 5 and st_geometrytype(geometry) in ('ST_Polygon','ST_MultiPolygon') order by rank_search asc limit 1";
+							if (CONST_Debug) var_dump($sSQL);
+							$sPlaceGeom = $this->oDB->getOne($sSQL);
+						}
+
+						if ($sPlaceGeom)
+						{
+							$sPlaceIDs = false;
+						}
+						else
+						{
+							$iMaxRank += 5;
+							$sSQL = "select place_id from placex where place_id in ($sPlaceIDs) and rank_search < $iMaxRank";
+							if (CONST_Debug) var_dump($sSQL);
+							$aPlaceIDs = $this->oDB->getCol($sSQL);
+							$sPlaceIDs = join(',',$aPlaceIDs);
+						}
+
+						if ($sPlaceIDs || $sPlaceGeom)
+						{
+
+							$fRange = 0.01;
+							if ($bCacheTable)
+							{
+								// More efficient - can make the range bigger
+								$fRange = 0.05;
+
+								$sOrderBySQL = '';
+								if ($aSearch->hasNearPoint()) $sOrderBySQL = "ST_Distance($aSearch->sqlNearPoint(), l.centroid)";
+								else if ($sPlaceIDs) $sOrderBySQL = "ST_Distance(l.centroid, f.geometry)";
+								else if ($sPlaceGeom) $sOrderBysSQL = "ST_Distance(st_centroid('".$sPlaceGeom."'), l.centroid)";
+
+								$sSQL = "select distinct l.place_id".($sOrderBySQL?','.$sOrderBySQL:'').' from place_classtype_'.$aSearch->getClassType().' as l';
+								if ($this->sCountryCodesSQL) $sSQL .= " join placex as lp using (place_id)";
+								if ($sPlaceIDs)
+								{
+									$sSQL .= ",placex as f where ";
+									$sSQL .= "f.place_id in ($sPlaceIDs) and ST_DWithin(l.centroid, f.centroid, $fRange) ";
+								}
+								if ($sPlaceGeom)
+								{
+									$sSQL .= " where ";
+									$sSQL .= "ST_Contains('".$sPlaceGeom."', l.centroid) ";
+								}
+								if (sizeof($this->aExcludePlaceIDs))
+								{
+									$sSQL .= " and l.place_id not in (".join(',',$this->aExcludePlaceIDs).")";
+								}
+								if ($this->sCountryCodesSQL) $sSQL .= " and lp.calculated_country_code in ($this->sCountryCodesSQL)";
+								if ($sOrderBySQL) $sSQL .= "order by ".$sOrderBySQL." asc";
+								if ($this->iOffset) $sSQL .= " offset $this->iOffset";
+								$sSQL .= " limit $this->iLimit";
+								if (CONST_Debug) var_dump($sSQL);
+								$aClassPlaceIDs = array_merge($aClassPlaceIDs, $this->oDB->getCol($sSQL));
+							}
+							else
+							{
+								if ($aSearch->hasRadius()) $fRange = $aSearch->getRadius();
+
+								$sOrderBySQL = '';
+								if ($aSearch->hasNearPoint()) $sOrderBySQL = 'ST_Distance('.$aSearch->sqlNearPoint().', l.geometry)';
+								else $sOrderBySQL = 'ST_Distance(l.geometry, f.geometry)';
+
+								$sSQL = "select distinct l.place_id".($sOrderBysSQL?','.$sOrderBysSQL:'')." from placex as l,placex as f where ";
+								$sSQL .= "f.place_id in ( $sPlaceIDs) and ST_DWithin(l.geometry, f.centroid, $fRange) ";
+								$sSQL .= "and l.class='".$aSearch->getClass()."' and l.type='".$aSearch->getType()."' ";
+								if (sizeof($this->aExcludePlaceIDs))
+								{
+									$sSQL .= " and l.place_id not in (".join(',',$this->aExcludePlaceIDs).")";
+								}
+								if ($this->sCountryCodesSQL) $sSQL .= " and l.calculated_country_code in ($this->sCountryCodesSQL)";
+								if ($sOrderBy) $sSQL .= "order by ".$OrderBysSQL." asc";
+								if ($this->iOffset) $sSQL .= " offset $this->iOffset";
+								$sSQL .= " limit $this->iLimit";
+								if (CONST_Debug) var_dump($sSQL);
+								$aClassPlaceIDs = array_merge($aClassPlaceIDs, $this->oDB->getCol($sSQL));
+							}
+						}
+					}
+
+					$aPlaceIDs = $aClassPlaceIDs;
+
+				}
+
+			}
+
+			return $aPlaceIDs;
 		}
 
 		/* Perform the actual query lookup.
@@ -499,7 +832,7 @@
 			  admin_level: see http://wiki.openstreetmap.org/wiki/Admin_level
 			  rank_search: rank in search hierarchy
 							(see also http://wiki.openstreetmap.org/wiki/Nominatim/Development_overview#Country_to_street_level)
-			  rank_address: rank in address hierarchy (determines orer in address)
+			  rank_address: rank in address hierarchy (determines order in address)
 			  place_id: internal key (may differ between different instances)
 			  country_code: ISO country code
 			  langaddress: localized full address
@@ -520,12 +853,6 @@
 			if (!$this->sQuery && !$this->aStructuredQuery) return false;
 
 			$sLanguagePrefArraySQL = "ARRAY[".join(',',array_map("getDBQuoted",$this->aLangPrefOrder))."]";
-			$sCountryCodesSQL = false;
-			if ($this->aCountryCodes && sizeof($this->aCountryCodes))
-			{
-				$sCountryCodesSQL = join(',', array_map('addQuotes', $this->aCountryCodes));
-			}
-
 			$sQuery = $this->sQuery;
 
 			// Conflicts between US state abreviations and various words for 'the' in different languages
@@ -599,12 +926,7 @@
 				// Do we have a radius search?
 				if ($this->aNearPoint)
 				{
-					$sNearPointSQL = "ST_SetSRID(ST_Point(".(float)$this->aNearPoint[1].",".(float)$this->aNearPoint[0]."),4326)";
 					$aSearches[0]->setNearPoint($this->aNearPoint);
-				}
-				else
-				{
-					$sNearPointSQL = false;
 				}
 
 				// currently disabled: 'special' terms in the search
@@ -705,327 +1027,7 @@
 						if (CONST_Debug) { echo "<hr><b>Search Loop, group $iGroupLoop, loop $iQueryLoop</b>"; }
 						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getWordIds());
 
-						// No location term?
-						if (!$aSearch->hasLocationTerm())
-						{
-							if ($aSearch->isCountrySearch())
-							{
-								// Just looking for a country by code - look it up
-								if (4 >= $this->iMinAddressRank && 4 <= $this->iMaxAddressRank)
-								{
-									$sSQL = "select place_id from placex where calculated_country_code='".$aSearch['sCountryCode']."' and rank_search = 4";
-									if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
-                                    if ($bBoundingBoxSearch)
-                                        $sSQL .= " and _st_intersects($this->sViewboxSmallSQL, geometry)";
-									$sSQL .= " order by st_area(geometry) desc limit 1";
-									if (CONST_Debug) var_dump($sSQL);
-									$aPlaceIDs = $this->oDB->getCol($sSQL);
-								}
-								else
-								{
-									$aPlaceIDs = array();
-								}
-							}
-							else
-							{
-								if (!$bBoundingBoxSearch && !$aSearch->hasNearPoint()) continue;
-								if (!$aSearch->hasClass()) continue;
-								// class search
-								$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
-								if ($this->oDB->getOne($sSQL))
-								{
-									$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxSmallSQL);
-									// If excluded place IDs are given, it is fair to assume that
-									// there have been results in the small box, so no further
-									// expansion in that case.
-									// Also don't expand if bounded results were requested.
-									if (!sizeof($aPlaceIDs) && !sizeof($this->aExcludePlaceIDs) && !$this->bBoundedSearch)
-									{
-										$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxLargeSQL);
-									}
-								}
-								else
-								{
-									$sSQL = "select place_id from placex where class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
-									$sSQL .= " and st_contains($this->sViewboxSmallSQL, geometry) and linked_place_id is null";
-									if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
-									if ($sViewboxCentreSQL)	$sSQL .= " order by st_distance($sViewboxCentreSQL, centroid) asc";
-									$sSQL .= " limit $this->iLimit";
-									if (CONST_Debug) var_dump($sSQL);
-									$aPlaceIDs = $this->oDB->getCol($sSQL);
-								}
-							}
-						}
-						else
-						{
-							$aPlaceIDs = array();
-
-							// First we need a position, either aName or fLat or both
-							$aTerms = array();
-							$aOrder = array();
-
-							if ($aSearch->isHouseNumberSearch())
-							{
-								$sHouseNumberRegex = '\\\\m'.$aSearch->getHouseNumber().'\\\\M';
-								$aOrder[] = "exists(select place_id from placex where parent_place_id = search_name.place_id and make_standard_ref(housenumber) ~* E'".$sHouseNumberRegex."' limit 1) desc";
-							}
-
-							// TODO: filter out the pointless search terms (2 letter name tokens and less)
-							// they might be right - but they are just too darned expensive to run
-							if ($aSearch->numNames()) $aTerms[] = 'name_vector @> ARRAY['.$aSearch->getNameList().']';
-							if ($aSearch->hasNonNames()) $aTerms[] = 'array_cat(name_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getNonNameList().']';
-							if ($aSearch->hasAddress())
-							{
-								// For infrequent name terms disable index usage for address
-								if (CONST_Search_NameOnlySearchFrequencyThreshold &&
-										$aSearch->numNames() == 1 &&
-										$oWords->getWordFrequency($aSearch->getFirstName()) < CONST_Search_NameOnlySearchFrequencyThreshold)
-								{
-									$aTerms[] = 'array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getFullAddressList().']';
-								}
-								else
-								{
-									$aTerms[] = 'nameaddress_vector @> ARRAY['.$aSearch->getAddressList().']';
-									if ($aSearch->hasNonAddress()) $aTerms[] = 'array_cat(nameaddress_vector,ARRAY[]::integer[]) @> ARRAY['.$aSearch->getNonAddressList().']';
-								}
-							}
-							if ($aSearch->hasCountryCode()) $aTerms[] = "country_code = '".pg_escape_string($aSearch->getCountryCode())."'";
-							if ($aSearch->hasHouseNumber())
-							{
-								$aTerms[] = "address_rank between 16 and 27";
-							}
-							else
-							{
-								if ($this->iMinAddressRank > 0)
-								{
-									$aTerms[] = "address_rank >= ".$this->iMinAddressRank;
-								}
-								if ($this->iMaxAddressRank < 30)
-								{
-									$aTerms[] = "address_rank <= ".$this->iMaxAddressRank;
-								}
-							}
-							if ($aSearch->hasNearPoint())
-							{
-								$aTerms[] = 'ST_DWithin(centroid,'.$sNearPointSQL.','.$aSearch->getRadius().')';
-								$aOrder[] = 'ST_Distance(centroid,'.$sNearPointSQL.') ASC';
-							}
-							if (sizeof($this->aExcludePlaceIDs))
-							{
-								$aTerms[] = "place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-							}
-							if ($sCountryCodesSQL)
-							{
-								$aTerms[] = "country_code in ($sCountryCodesSQL)";
-							}
-
-							if ($bBoundingBoxSearch) $aTerms[] = "centroid && $this->sViewboxSmallSQL";
-							//if ($sNearPointSQL) $aOrder[] = "ST_Distance($sNearPointSQL, centroid) asc";
-
-							if ($aSearch->hasHouseNumber())
-							{
-								$sImportanceSQL = '- abs(26 - address_rank) + 3';
-							}
-							else
-							{
-								$sImportanceSQL = '(case when importance = 0 OR importance IS NULL then 0.75-(search_rank::float/40) else importance end)';
-							}
-							if ($this->sViewboxSmallSQL) $sImportanceSQL .= " * case when ST_Contains($this->sViewboxSmallSQL, centroid) THEN 1 ELSE 0.5 END";
-							if ($this->sViewboxLargeSQL) $sImportanceSQL .= " * case when ST_Contains($this->sViewboxLargeSQL, centroid) THEN 1 ELSE 0.5 END";
-
-							$aOrder[] = "$sImportanceSQL DESC";
-							if ($aSearch->hasFullNameAddress())
-							{
-								$sExactMatchSQL = '(select count(*) from (select unnest(ARRAY['.$aSearch->getFullNameList().']) INTERSECT select unnest(nameaddress_vector))s) as exactmatch';
-								$aOrder[] = 'exactmatch DESC';
-							} else {
-								$sExactMatchSQL = '0::int as exactmatch';
-							}
-
-							if (sizeof($aTerms))
-							{
-								$sSQL = "select place_id, ";
-								$sSQL .= $sExactMatchSQL;
-								$sSQL .= " from search_name";
-								$sSQL .= " where ".join(' and ',$aTerms);
-								$sSQL .= " order by ".join(', ',$aOrder);
-								if ($aSearch->hasHouseNumber() || $aSearch->hasClass())
-									$sSQL .= " limit 20";
-								elseif ($aSearch->numNames() == 0 && !$aSearch->hasAddress() && $aSearch->hasClass())
-									$sSQL .= " limit 1";
-								else
-									$sSQL .= " limit ".$this->iLimit;
-
-								if (CONST_Debug) { var_dump($sSQL); }
-								$aViewBoxPlaceIDs = $this->oDB->getAll($sSQL);
-								if (PEAR::IsError($aViewBoxPlaceIDs))
-								{
-									failInternalError("Could not get places for search terms.", $sSQL, $aViewBoxPlaceIDs);
-								}
-								//var_dump($aViewBoxPlaceIDs);
-								// Did we have an viewbox matches?
-								$aPlaceIDs = array();
-								$bViewBoxMatch = false;
-								foreach($aViewBoxPlaceIDs as $aViewBoxRow)
-								{
-									$aPlaceIDs[] = $aViewBoxRow['place_id'];
-									$this->exactMatchCache[$aViewBoxRow['place_id']] = $aViewBoxRow['exactmatch'];
-								}
-							}
-
-							if ($aSearch->hasHouseNumber() && sizeof($aPlaceIDs))
-							{
-								$aRoadPlaceIDs = $aPlaceIDs;
-								$sPlaceIDs = join(',',$aPlaceIDs);
-								$sHouseNumberSQL = pg_escape_string($aSearch->getHouseNumber());
-
-								// Now they are indexed look for a house attached to a street we found
-								$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
-								                                 'placex', $sPlaceIDs);
-
-								// If not try the aux fallback table
-								if (!sizeof($aPlaceIDs))
-								{
-									$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
-									                                 'location_property_aux',
-									                                 $sPlaceIDs);
-								}
-
-								// And fall back to tiger data for the us
-								if (!sizeof($aPlaceIDs)
-								    && (!$aSearch->hasCountryCode() ||
-								        $aSearch->getCountryCode() == 'us'))
-								{
-									$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
-									                                 'location_property_tiger',
-									                                 $sPlaceIDs);
-								}
-
-								// Fallback to the road
-								if (!sizeof($aPlaceIDs)
-								    && preg_match('/[0-9]+/', $aSearch->getHouseNumber()))
-								{
-									$aPlaceIDs = $aRoadPlaceIDs;
-								}
-							}
-
-							if ($aSearch->hasClass() && sizeof($aPlaceIDs))
-							{
-								$sPlaceIDs = join(',',$aPlaceIDs);
-								$aClassPlaceIDs = array();
-
-								if ($aSearch->hasOperator('name'))
-								{
-									// If they were searching for a named class (i.e. 'Kings Head pub')
-									// then we might have an extra match
-									$sSQL = "select place_id from placex where place_id in ($sPlaceIDs) and class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
-									$sSQL .= ' and linked_place_id is null';
-									if ($sCountryCodesSQL) $sSQL .= " and calculated_country_code in ($sCountryCodesSQL)";
-									$sSQL .= " order by rank_search asc limit $this->iLimit";
-									if (CONST_Debug) var_dump($sSQL);
-									$aClassPlaceIDs = $this->oDB->getCol($sSQL);
-								}
-
-								if ($aSearch->hasOperator('near')) // & in
-								{
-									$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
-									$bCacheTable = $this->oDB->getOne($sSQL);
-
-									$sSQL = "select min(rank_search) from placex where place_id in ($sPlaceIDs)";
-
-									if (CONST_Debug) var_dump($sSQL);
-									$iMaxRank = ((int)$this->oDB->getOne($sSQL));
-
-									// For state / country level searches the normal radius search doesn't work very well
-									$sPlaceGeom = false;
-									if ($iMaxRank < 9 && $bCacheTable)
-									{
-										// Try and get a polygon to search in instead
-										$sSQL = "select geometry from placex where place_id in ($sPlaceIDs) and rank_search < $iMaxRank + 5 and st_geometrytype(geometry) in ('ST_Polygon','ST_MultiPolygon') order by rank_search asc limit 1";
-										if (CONST_Debug) var_dump($sSQL);
-										$sPlaceGeom = $this->oDB->getOne($sSQL);
-									}
-
-									if ($sPlaceGeom)
-									{
-										$sPlaceIDs = false;
-									}
-									else
-									{
-										$iMaxRank += 5;
-										$sSQL = "select place_id from placex where place_id in ($sPlaceIDs) and rank_search < $iMaxRank";
-										if (CONST_Debug) var_dump($sSQL);
-										$aPlaceIDs = $this->oDB->getCol($sSQL);
-										$sPlaceIDs = join(',',$aPlaceIDs);
-									}
-
-									if ($sPlaceIDs || $sPlaceGeom)
-									{
-
-										$fRange = 0.01;
-										if ($bCacheTable)
-										{
-											// More efficient - can make the range bigger
-											$fRange = 0.05;
-
-											$sOrderBySQL = '';
-											if ($sNearPointSQL) $sOrderBySQL = "ST_Distance($sNearPointSQL, l.centroid)";
-											else if ($sPlaceIDs) $sOrderBySQL = "ST_Distance(l.centroid, f.geometry)";
-											else if ($sPlaceGeom) $sOrderBysSQL = "ST_Distance(st_centroid('".$sPlaceGeom."'), l.centroid)";
-
-											$sSQL = "select distinct l.place_id".($sOrderBySQL?','.$sOrderBySQL:'').' from place_classtype_'.$aSearch->getClassType().' as l';
-											if ($sCountryCodesSQL) $sSQL .= " join placex as lp using (place_id)";
-											if ($sPlaceIDs)
-											{
-												$sSQL .= ",placex as f where ";
-												$sSQL .= "f.place_id in ($sPlaceIDs) and ST_DWithin(l.centroid, f.centroid, $fRange) ";
-											}
-											if ($sPlaceGeom)
-											{
-												$sSQL .= " where ";
-												$sSQL .= "ST_Contains('".$sPlaceGeom."', l.centroid) ";
-											}
-											if (sizeof($this->aExcludePlaceIDs))
-											{
-												$sSQL .= " and l.place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-											}
-											if ($sCountryCodesSQL) $sSQL .= " and lp.calculated_country_code in ($sCountryCodesSQL)";
-											if ($sOrderBySQL) $sSQL .= "order by ".$sOrderBySQL." asc";
-											if ($this->iOffset) $sSQL .= " offset $this->iOffset";
-											$sSQL .= " limit $this->iLimit";
-											if (CONST_Debug) var_dump($sSQL);
-											$aClassPlaceIDs = array_merge($aClassPlaceIDs, $this->oDB->getCol($sSQL));
-										}
-										else
-										{
-											if ($aSearch->hasRadius()) $fRange = $aSearch->getRadius();
-
-											$sOrderBySQL = '';
-											if ($sNearPointSQL) $sOrderBySQL = "ST_Distance($sNearPointSQL, l.geometry)";
-											else $sOrderBySQL = "ST_Distance(l.geometry, f.geometry)";
-
-											$sSQL = "select distinct l.place_id".($sOrderBysSQL?','.$sOrderBysSQL:'')." from placex as l,placex as f where ";
-											$sSQL .= "f.place_id in ( $sPlaceIDs) and ST_DWithin(l.geometry, f.centroid, $fRange) ";
-											$sSQL .= "and l.class='".$aSearch->getClass()."' and l.type='".$aSearch->getType()."' ";
-											if (sizeof($this->aExcludePlaceIDs))
-											{
-												$sSQL .= " and l.place_id not in (".join(',',$this->aExcludePlaceIDs).")";
-											}
-											if ($sCountryCodesSQL) $sSQL .= " and l.calculated_country_code in ($sCountryCodesSQL)";
-											if ($sOrderBy) $sSQL .= "order by ".$OrderBysSQL." asc";
-											if ($this->iOffset) $sSQL .= " offset $this->iOffset";
-											$sSQL .= " limit $this->iLimit";
-											if (CONST_Debug) var_dump($sSQL);
-											$aClassPlaceIDs = array_merge($aClassPlaceIDs, $this->oDB->getCol($sSQL));
-										}
-									}
-								}
-
-								$aPlaceIDs = $aClassPlaceIDs;
-
-							}
-
-						}
+						$aPlaceIDs = $this->executeSingleSearch($aSearch, $bBoundingBoxSearch);
 
 						if (PEAR::IsError($aPlaceIDs))
 						{

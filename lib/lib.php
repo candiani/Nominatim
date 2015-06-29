@@ -691,66 +691,29 @@
 	function _debugDumpGroupedSearches($aData, $aWordsIDs)
 	{
 		echo "<table border=\"1\">";
-		echo "<tr><th>rank</th><th>Name Tokens</th><th>Name Not</th><th>Address Tokens</th><th>Address Not</th><th>country</th><th>operator</th><th>class</th><th>type</th><th>house#</th><th>Lat</th><th>Lon</th><th>Radius</th></tr>";
+		echo "<tr><th>rank</th><th>Name Tokens</th><th>Name Not</th><th>Address Tokens</th><th>Address Not</th><th>country</th><th>operator</th><th>class</th><th>type</th><th>house#</th><th>Lat/Lon</th><th>Radius</th></tr>";
 		foreach($aData as $iRank => $aRankedSet)
 		{
 			foreach($aRankedSet as $aRow)
 			{
 				echo "<tr>";
 				echo "<td>$iRank</td>";
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::Name, $aWordsIDs).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::NonName, $aWordsIDs).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::Address, $aWordsIDs).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::NonAddress, $aWordsIDs).'</td>';
+				echo '<td>'.$aRow->getCountryCode().'</td>';
+				echo '<td>'.$aRow->getOperator().'</td>';
+				echo '<td>'.$aRow->getClass().'</td>';
+				echo '<td>'.$aRow->getType().'</td>';
+				echo '<td>'.$aRow->getHouseNumber().'</td>';
+				echo '<td>'.$aRow->sqlNearPoint().'</td>';
+				echo '<td>'.$aRow->getRadius().'</td>';
 
-				echo "<td>";
-				$sSep = '';
-				foreach($aRow['aName'] as $iWordID)
-				{
-					echo $sSep.'#'.$aWordsIDs[$iWordID].'#';
-					$sSep = ', ';
-				}
-				echo "</td>";
-
-				echo "<td>";
-				$sSep = '';
-				foreach($aRow['aNameNonSearch'] as $iWordID)
-				{
-					echo $sSep.'#'.$aWordsIDs[$iWordID].'#';
-					$sSep = ', ';
-				}
-				echo "</td>";
-
-				echo "<td>";
-				$sSep = '';
-				foreach($aRow['aAddress'] as $iWordID)
-				{
-					echo $sSep.'#'.$aWordsIDs[$iWordID].'#';
-					$sSep = ', ';
-				}
-				echo "</td>";
-
-				echo "<td>";
-				$sSep = '';
-				foreach($aRow['aAddressNonSearch'] as $iWordID)
-				{
-					echo $sSep.'#'.$aWordsIDs[$iWordID].'#';
-					$sSep = ', ';
-				}
-				echo "</td>";
-
-				echo "<td>".$aRow['sCountryCode']."</td>";
-
-				echo "<td>".$aRow['sOperator']."</td>";
-				echo "<td>".$aRow['sClass']."</td>";
-				echo "<td>".$aRow['sType']."</td>";
-
-				echo "<td>".$aRow['sHouseNumber']."</td>";
-
-				echo "<td>".$aRow['fLat']."</td>";
-				echo "<td>".$aRow['fLon']."</td>";
-				echo "<td>".$aRow['fRadius']."</td>";
-
-				echo "</tr>";
+				echo '</tr>';
 			}
 		}
-		echo "</table>";
+		echo '</table>';
 	}
 
 

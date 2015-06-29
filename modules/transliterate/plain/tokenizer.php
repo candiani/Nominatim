@@ -362,16 +362,16 @@
 										if (isset($aSearchTerm['word_id']) && $aSearchTerm['word_id'])
 										{
 											// If we already have a name try putting the postcode first
-											if ($aSearch->numNames() > 0)
+											if ($aSearch->hasTokens(TokenType::Name))
 											{
 												$aNewSearch = $aSearch;
-												$aNewSearch->addAddresses($aNewSearch->getNames());
-												$aNewSearch->clearNames();
-												$aNewSearch->addName($aSearchTerm['word_id']);
+												$aNewSearch->addTokens(TokenType::Address, $aNewSearch->getTokens(TokenType::Name));
+												$aNewSearch->clearTokens(TokenType::Name);
+												$aNewSearch->addToken(TokenType::Name, $aSearchTerm['word_id']);
 												if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aNewSearch;
 											}
 
-											if ($aSearch->numNames() > 0)
+											if ($aSearch->hasTokens(TokenType::Name))
 											{
 												if ((!$bStructuredPhrases || $iPhrase > 0) && $sPhraseType != 'country' && (!isset($this->aTokens[$sToken]) || strpos($sToken, ' ') !== false))
 												{
@@ -379,13 +379,13 @@
 												}
 												else
 												{
-													$aCurrentSearch->addFullAddress($aSearchTerm['word_id']);
+													$aCurrentSearch->addToken(TokenType::Full, $aSearchTerm['word_id']);
 													$aSearch->incSearchRank(1000); // skip;
 												}
 											}
 											else
 											{
-												$aSearch->addName($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::Name, $aSearchTerm['word_id']);
 											}
 											if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 										}
@@ -419,21 +419,21 @@
 									}
 									elseif (isset($aSearchTerm['word_id']) && $aSearchTerm['word_id'])
 									{
-										if ($aSearch->numNames() > 0)
+										if ($aSearch->hasTokens(TokenType::Name))
 										{
 											if ((!$bStructuredPhrases || $iPhrase > 0) && $sPhraseType != 'country' && (!isset($this->aTokens[$sToken]) || strpos($sToken, ' ') !== false))
 											{
-												$aSearch->addAddress($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::Address, $aSearchTerm['word_id']);
 											}
 											else
 											{
-												$aCurrentSearch->addFullAddress($aSearchTerm['word_id']);
+												$aCurrentSearch->addToken(TokenType::Full, $aSearchTerm['word_id']);
 												$aSearch->incSearchRank(1000); // skip;
 											}
 										}
 										else
 										{
-											$aSearch->addName($aSearchTerm['word_id']);
+											$aSearch->addToken(TokenType::Name, $aSearchTerm['word_id']);
 										}
 										if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 									}
@@ -449,18 +449,18 @@
 								{
 									if (isset($aSearchTerm['word_id']) && $aSearchTerm['word_id'])
 									{
-										if ((!$bStructuredPhrases || $iPhrase > 0) && $aCurrentSearch->numNames() > 0 && strpos($sToken, ' ') === false)
+										if ((!$bStructuredPhrases || $iPhrase > 0) && $aCurrentSearch->hasTokens(TokenType::Name) && strpos($sToken, ' ') === false)
 										{
 											$aSearch = $aCurrentSearch;
 											$aSearch->incSearchRank();
 											if ($this->aWordFrequencyScores[$aSearchTerm['word_id']] < CONST_Max_Word_Frequency)
 											{
-												$aSearch->addAddress($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::Address, $aSearchTerm['word_id']);
 												if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 											}
 											elseif (isset($this->aTokens[' '.$sToken])) // revert to the token version?
 											{
-												$aSearch->addNonSearchAddress($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::NonAddress, $aSearchTerm['word_id']);
 												$aSearch->incSearchRank();
 												if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 												foreach($this->aTokens[' '.$sToken] as $aSearchTermToken)
@@ -471,29 +471,29 @@
 													{
 														$aSearch = $aCurrentSearch;
 														$aSearch->incSearchRank();
-														$aSearch->addAddress($aSearchTermToken['word_id']);
+														$aSearch->addToken(TokenType::Address, $aSearchTermToken['word_id']);
 														if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 													}
 												}
 											}
 											else
 											{
-												$aSearch->addNonSearchAddress($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::NonAddress, $aSearchTerm['word_id']);
 												if (preg_match('#^[0-9]+$#', $sToken)) $aSearch->incSearchRank(2);
 												if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 											}
 										}
 
-										if ($aCurrentSearch->numNames() > 0 || $aCurrentSearch->getNamePhrase() == $iPhrase)
+										if ($aCurrentSearch->hasTokens(TokenType::Name) || $aCurrentSearch->getNamePhrase() == $iPhrase)
 										{
 											$aSearch = $aCurrentSearch;
 											$aSearch->incSearchRank();
-											if ($aCurrentSearch->numNames() > 0) $aSearch->incSearchRank();
+											if ($aCurrentSearch->hasTokens(TokenType::Name)) $aSearch->incSearchRank();
 											if (preg_match('#^[0-9]+$#', $sToken)) $aSearch->incSearchRank(2);
 											if ($this->aWordFrequencyScores[$aSearchTerm['word_id']] < CONST_Max_Word_Frequency)
-												$aSearch->addName($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::Name, $aSearchTerm['word_id']);
 											else
-												$aSearch->addNonSearchName($aSearchTerm['word_id']);
+												$aSearch->addToken(TokenType::NonName, $aSearchTerm['word_id']);
 											$aSearch->setNamePhrase($iPhrase);
 											if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
 										}

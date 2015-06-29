@@ -1,29 +1,48 @@
 <?php
-	// Describes a possible search interpretation, which is then
-	// used to construct a database query.
+	// Properties of a search token.
+	class TokenType
+	{
+		const Name = 0;         // part of name, searchable
+		const NonName = 1;     // part of name, non-searchable
+		const Address = 2;      // part of address, searchable
+		const NonAddress = 3;  // part of address, non-searchable
+		const Full = 4;         // full word terms in query
+	}
+
+	// A single interpretation of a search query.
+	//
+	// A tokenizer must create and fill this structure.
 	class SearchDescription
 	{
+		// Search rank that determines the order in which searches will be handled.
 		private $iSearchRank = 0;
+		// Id of the last name phrase (aka number of phrase parts in name)
 		private $iNamePhrase = -1; //???
+		// Country the search should be restricted to
 		private $sCountryCode = false;
-		private $aName = array();
-		private $aAddress = array();
-		private $aFullNameAddress = array();
-		private $aNameNonSearch = array();
-		private $aAddressNonSearch = array();
+		// Search terms as word tokens ordered by their type
+		private $aTokens = array(
+		                    TokenType::Name => array(),
+		                    TokenType::NonName => array(),
+		                    TokenType::Address => array(),
+		                    TokenType::NonAddress => array(),
+		                    TokenType::Full => array(),
+		                   );
+		// Special term search
 		private $sOperator = false;
-		private $aFeatureName = array();
 		private $sClass = false;
 		private $sType = false;
+		// House number search
 		private $sHouseNumber = false;
-		private $fLat = false;
-		private $fLon = false;
+		// Restrict search to a geographic point
+		private $sNearPoint = false;
 		private $fRadius = false;
 
 		function setNearPoint($aNearPoint)
 		{
-			$this->$fLat = (float) $aNearPoint[0];
-			$this->$fLon = (float) $aNearPoint[1];
+			$this->sNearPoint  = 'ST_SetSRID(ST_Point(';
+			$this->sNearPoint .= (float)$this->aNearPoint[1].',';
+			$this->sNearPoint .= (float)$this->aNearPoint[0].'),4326)';
 			$this->$fRadius = (float) $aNearPoint[2];
 		}
 
@@ -35,6 +54,11 @@
 		function setNamePhrase($iPhrase)
 		{
 			$this->iNamePhrase = $iPhrase;
+		}
+
+		function setHouseNumber($sNumber)
+		{
+			$this->sHouseNumber = $sNumber;
 		}
 
 		function incSearchRank($iAdd = 1)
@@ -58,39 +82,19 @@
 			$this->sOperator = $sOperator;
 		}
 
-		function clearNames()
+		function clearTokens($eType)
 		{
-			$this->aName = array();
+			$this->aTokens[$eType] = array();
 		}
 
-		function addName($iWord)
+		function addToken($eType, $iWord)
 		{
-			$this->aName[$iWord] = $iWord;
+			$this->aTokens[$eType][$iWord] = $iWord;
 		}
 
-		function addNonSearchName($iWord)
+		function addTokens($eType, $aTerms)
 		{
-			$this->aNameNonSearch[$iWord] = $iWord;
-		}
-
-		function addAddress($iWord)
-		{
-			$this->aAddress[$iWord] = $iWord;
-		}
-
-		function addAddresses($aTerms)
-		{
-			$this->aAddress = array_merge($this->aAddress, $aTerms);
-		}
-
-		function addNonSearchAddress($iWord)
-		{
-			$this->aAddressNonSearch($iWord);
-		}
-
-		function addFullAddress($iWord)
-		{
-			$this->aFullNameAddress[$iWord] = $iWord;
+			$this->aTokens[$eType] = array_merge($this->aTokens[$eType], $aTerms);
 		}
 
 		function getSearchRank()
@@ -100,7 +104,9 @@
 
 		function hasLocationTerm()
 		{
-			return sizeof($this->aName) || sizeof($this->aAddress) || $this->fLon;
+			return sizeof($this->aTokens[TokenType::Name])
+			       || sizeof($this->aTokens[TokenType::Address])
+			       || $this->sNearPoint;
 		}
 
 		function isCountrySearch()
@@ -120,7 +126,7 @@
 
 		function hasNearPoint()
 		{
-			return (bool) $this->fLon && $this->fLat;
+			return (bool) $this->sNearPoint;
 		}
 
 		function hasRadius()
@@ -133,29 +139,9 @@
 			return (bool) $this->sClass;
 		}
 
-		function numNames()
+		function hasTokens($eType)
 		{
-			return sizeof($this->aName);
-		}
-
-		function hasNonNames()
-		{
-			return (bool) sizeof($this->aNameNonSearch);
-		}
-
-		function hasAddress()
-		{
-			return (bool) sizeof($this->aAddress) && $this->aName != $this->aAddress;
-		}
-
-		function hasNonAddress()
-		{
-			return (bool) sizeof($this->aAddressNonSearch);
-		}
-
-		function hasFullNameAddress()
-		{
-			return (bool) sizeof($this->aFullNameAddress);
+			return (bool) sizeof($this->aTokens[$eType]);
 		}
 
 		function hasCountryCode()
@@ -188,44 +174,24 @@
 			return $this->sHouseNumber;
 		}
 
-		function getNames()
+		function getOperator()
 		{
-			return $this->aName;
+			return $this->sOperator;
 		}
 
-		function getNameList()
+		function getTokens($eType)
 		{
-			return join($this->aName, ',');
+			return $this->aTokens[$eType];
+		}
+
+		function getTokenList($eType)
+		{
+			return join($this->aTokens[$eType], ',');
 		}
 
 		function getFirstName()
 		{
-			return $this->aName[reset($this->aName)];
-		}
-
-		function getNonNameList()
-		{
-			return join($this->aNameNonSearch, ',');
-		}
-
-		function getFullNameList()
-		{
-			return join($this->aFullNameAddress, ',');
-		}
-
-		function getAddressList()
-		{
-			return join($this->aAddress, ',');
-		}
-
-		function getNonAddressList()
-		{
-			return join($this->aAddressNonSearch, ',');
-		}
-
-		function getFullAddressList()
-		{
-			return join(array_merge($this->aAddress, $this->aAddressNonSearch), ',');
+			return reset($this->aTokens[TokenType::Name]);
 		}
 
 		function getCountryCode()
@@ -241,6 +207,23 @@
 		function getNamePhrase()
 		{
 			return $this->iNamePhrase;
+		}
+
+		function sqlNearPoint()
+		{
+			return $this->sNearPoint;
+		}
+
+		function getDebugTokenList($eType, $aWordIDs)
+		{
+			$sOut = '';
+			$sSep = '';
+			foreach($this->aTokens[$eType] as $iWordID)
+			{
+				$sOut .= $sSep.'#'.$aWordIDs[$iWordID].'#';
+				$sSep = ', ';
+			}
+			return $sOut;
 		}
 
 		static function sortBySearchRank($a, $b)
