@@ -214,13 +214,13 @@
 			return $this->sNearPoint;
 		}
 
-		function getDebugTokenList($eType, $aWordIDs)
+		function getDebugTokenList($eType, &$oWords)
 		{
 			$sOut = '';
 			$sSep = '';
-			foreach($this->aTokens[$eType] as $iWordID)
+			foreach($this->aTokens[$eType] as $iWordId)
 			{
-				$sOut .= $sSep.'#'.$aWordIDs[$iWordID].'#';
+				$sOut .= $sSep.'#'.$oWords->getWordToken($iWordId).'#';
 				$sSep = ', ';
 			}
 			return $sOut;

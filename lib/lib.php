@@ -688,7 +688,7 @@
 	}
 
 
-	function _debugDumpGroupedSearches($aData, $aWordsIDs)
+	function _debugDumpGroupedSearches($aData, &$oWords)
 	{
 		echo "<table border=\"1\">";
 		echo "<tr><th>rank</th><th>Name Tokens</th><th>Name Not</th><th>Address Tokens</th><th>Address Not</th><th>country</th><th>operator</th><th>class</th><th>type</th><th>house#</th><th>Lat/Lon</th><th>Radius</th></tr>";
@@ -698,10 +698,10 @@
 			{
 				echo "<tr>";
 				echo "<td>$iRank</td>";
-				echo '<td>'.$aRow->getDebugTokenList(TokenType::Name, $aWordsIDs).'</td>';
-				echo '<td>'.$aRow->getDebugTokenList(TokenType::NonName, $aWordsIDs).'</td>';
-				echo '<td>'.$aRow->getDebugTokenList(TokenType::Address, $aWordsIDs).'</td>';
-				echo '<td>'.$aRow->getDebugTokenList(TokenType::NonAddress, $aWordsIDs).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::Name, $oWords).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::NonName, $oWords).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::Address, $oWords).'</td>';
+				echo '<td>'.$aRow->getDebugTokenList(TokenType::NonAddress, $oWords).'</td>';
 				echo '<td>'.$aRow->getCountryCode().'</td>';
 				echo '<td>'.$aRow->getOperator().'</td>';
 				echo '<td>'.$aRow->getClass().'</td>';

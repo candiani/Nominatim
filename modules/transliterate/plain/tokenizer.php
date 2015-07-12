@@ -545,9 +545,8 @@
 			return $aGroupedSearches;
 		}
 
-		function getWordIds()
+		function getWordToken($iId)
 		{
-			$aWordsIDs = array();
 			if ($this->aTokens)
 			{
 				foreach($this->aTokens as $sToken => $aWords)
@@ -556,13 +555,16 @@
 					{
 						foreach($aWords as $aToken)
 						{
-							$aWordsIDs[$aToken['word_id']] = $sToken.'('.$aToken['word_id'].')';
+							if ($aToken['word_id'] == $iId)
+							{
+								return $sToken.'('.$aToken['word_id'].')';
+							}
 						}
 					}
 				}
 			}
 
-			return $aWordsIDs;
+			return '';
 		}
 
 		function getWordFrequency($sWord)

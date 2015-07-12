@@ -1012,7 +1012,7 @@
 					}
 				}
 
-				if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $oWords->getWordIds());
+				if (CONST_Debug) _debugDumpGroupedSearches($aGroupedSearches, $oWords);
 
 				$aResultPlaceIDs = array();
 				$iGroupLoop = 0;
@@ -1025,7 +1025,7 @@
 						$iQueryLoop++;
 
 						if (CONST_Debug) { echo "<hr><b>Search Loop, group $iGroupLoop, loop $iQueryLoop</b>"; }
-						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getWordIds());
+						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords);
 
 						$aPlaceIDs = $this->executeSingleSearch($aSearch, $bBoundingBoxSearch, $oWords);
 
