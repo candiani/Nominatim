@@ -19,7 +19,7 @@
 
 		protected $aExcludePlaceIDs = array();
 		protected $bDeDupe = true;
-		protected $bReverseInPlan = false;
+		protected $bReverseInPlan = true;
 
 		protected $iLimit = 20;
 		protected $iFinalLimit = 10;
@@ -33,6 +33,7 @@
 		protected $aViewBox = false;
 		protected $sViewboxSmallSQL = false;
 		protected $sViewboxLargeSQL = false;
+		protected $sViewboxCentreSQL = false;
 		protected $aRoutePoints = false;
 
 		protected $iMinAddressRank = 0;
@@ -457,7 +458,7 @@
 			return " and calculated_country_code in ($this->sCountryCodesSQL)";
 		}
 
-		private function queryForClass($sClassType, $sViewbox)
+		private function queryForClass($sClassType, $sViewbox, $sViewboxCentreSQL)
 		{
 			$sSQL = 'select place_id from place_classtype_'.$sClassType.' ct';
 			if ($this->sCountryCodesSQL) $sSQL .= ' join placex using (place_id)';
@@ -489,7 +490,7 @@
 			return $this->oDB->getCol($sSQL);
 		}
 
-		private function executeSingleSearch($aSearch, $bBoundingBoxSearch)
+		private function executeSingleSearch(&$aSearch, $bBoundingBoxSearch, &$oWords)
 		{
 			if (!$aSearch->hasLocationTerm())
 			{
@@ -519,7 +520,7 @@
 					$sSQL = "select count(*) from pg_tables where tablename = 'place_classtype_".$aSearch->getClassType()."'";
 					if ($this->oDB->getOne($sSQL))
 					{
-						$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxSmallSQL);
+						$aPlaceIDs = $this->queryForClass($aSearch->getClassType(), $this->sViewboxSmallSQL, $this->sViewboxCentreSQL);
 						// If excluded place IDs are given, it is fair to assume that
 						// there have been results in the small box, so no further
 						// expansion in that case.
@@ -534,7 +535,7 @@
 						$sSQL = "select place_id from placex where class='".$aSearch->getClass()."' and type='".$aSearch->getType()."'";
 						$sSQL .= " and st_contains($this->sViewboxSmallSQL, geometry) and linked_place_id is null";
 						if ($this->sCountryCodesSQL) $sSQL .= $this->sqlCountryCodes();
-						if ($sViewboxCentreSQL)	$sSQL .= " order by st_distance($sViewboxCentreSQL, centroid) asc";
+						if ($this->sViewboxCentreSQL)	$sSQL .= " order by st_distance($this->sViewboxCentreSQL, centroid) asc";
 						$sSQL .= " limit $this->iLimit";
 						if (CONST_Debug) var_dump($sSQL);
 						$aPlaceIDs = $this->oDB->getCol($sSQL);
@@ -668,15 +669,15 @@
 					$sHouseNumberSQL = pg_escape_string($aSearch->getHouseNumber());
 
 					// Now they are indexed look for a house attached to a street we found
-					$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
-					                                 'placex', $sPlaceIDs);
+					$aPlaceIDs = $this->queryForHousenumber($sHouseNumberSQL,
+					                                        'placex', $sPlaceIDs);
 
 					// If not try the aux fallback table
 					if (!sizeof($aPlaceIDs))
 					{
-						$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
-						                                 'location_property_aux',
-						                                 $sPlaceIDs);
+						$aPlaceIDs = $this->queryForHousenumber($sHouseNumberSQL,
+						                                       'location_property_aux',
+						                                       $sPlaceIDs);
 					}
 
 					// And fall back to tiger data for the us
@@ -684,9 +685,9 @@
 						&& (!$aSearch->hasCountryCode() ||
 							$aSearch->getCountryCode() == 'us'))
 					{
-						$aPlaceIDs = queryForHousenumber($sHouseNumberSQL,
-						                                 'location_property_tiger',
-						                                 $sPlaceIDs);
+						$aPlaceIDs = $this->queryForHousenumber($sHouseNumberSQL,
+						                                       'location_property_tiger',
+						                                       $sPlaceIDs);
 					}
 
 					// Fallback to the road
@@ -864,7 +865,6 @@
 			}
 
 			// View Box SQL
-			$sViewboxCentreSQL = false;
 			$bBoundingBoxSearch = false;
 			if ($this->aViewBox)
 			{
@@ -883,17 +883,17 @@
 			// Route SQL
 			if ($this->aRoutePoints)
 			{
-				$sViewboxCentreSQL = "ST_SetSRID('LINESTRING(";
+				$this->sViewboxCentreSQL = "ST_SetSRID('LINESTRING(";
 				$bFirst = true;
 				foreach($this->aRoutePoints as $aPoint)
 				{
-					if (!$bFirst) $sViewboxCentreSQL .= ",";
-					$sViewboxCentreSQL .= $aPoint[0].' '.$aPoint[1];
+					if (!$bFirst) $this->sViewboxCentreSQL .= ",";
+					$this->sViewboxCentreSQL .= $aPoint[0].' '.$aPoint[1];
 					$bFirst = false;
 				}
-				$sViewboxCentreSQL .= ")'::geometry,4326)";
+				$this->sViewboxCentreSQL .= ")'::geometry,4326)";
 
-				$sSQL = "select st_buffer(".$sViewboxCentreSQL.",".(float)($_GET['routewidth']/69).")";
+				$sSQL = "select st_buffer(".$this->sViewboxCentreSQL.",".(float)($_GET['routewidth']/69).")";
 				$this->sViewboxSmallSQL = $this->oDB->getOne($sSQL);
 				if (PEAR::isError($this->sViewboxSmallSQL))
 				{
@@ -901,7 +901,7 @@
 				}
 				$this->sViewboxSmallSQL = "'".$this->sViewboxSmallSQL."'::geometry";
 
-				$sSQL = "select st_buffer(".$sViewboxCentreSQL.",".(float)($_GET['routewidth']/30).")";
+				$sSQL = "select st_buffer(".$this->sViewboxCentreSQL.",".(float)($_GET['routewidth']/30).")";
 				$this->sViewboxLargeSQL = $this->oDB->getOne($sSQL);
 				if (PEAR::isError($this->sViewboxLargeSQL))
 				{
@@ -1027,7 +1027,7 @@
 						if (CONST_Debug) { echo "<hr><b>Search Loop, group $iGroupLoop, loop $iQueryLoop</b>"; }
 						if (CONST_Debug) _debugDumpGroupedSearches(array($iGroupedRank => array($aSearch)), $oWords->getWordIds());
 
-						$aPlaceIDs = $this->executeSingleSearch($aSearch, $bBoundingBoxSearch);
+						$aPlaceIDs = $this->executeSingleSearch($aSearch, $bBoundingBoxSearch, $oWords);
 
 						if (PEAR::IsError($aPlaceIDs))
 						{

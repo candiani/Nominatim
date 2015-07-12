@@ -41,9 +41,9 @@
 		function setNearPoint($aNearPoint)
 		{
 			$this->sNearPoint  = 'ST_SetSRID(ST_Point(';
-			$this->sNearPoint .= (float)$this->aNearPoint[1].',';
-			$this->sNearPoint .= (float)$this->aNearPoint[0].'),4326)';
-			$this->$fRadius = (float) $aNearPoint[2];
+			$this->sNearPoint .= (float)$aNearPoint[1].',';
+			$this->sNearPoint .= (float)$aNearPoint[0].'),4326)';
+			$this->fRadius = (float) $aNearPoint[2];
 		}
 
 		function setCountryCode($sCountryCode)
@@ -116,7 +116,7 @@
 
 		function isHouseNumberSearch()
 		{
-			return $this->sHouseNumber && sizeof($this->aAddress);
+			return $this->sHouseNumber && sizeof($this->aTokens[TokenType::Address]);
 		}
 
 		function hasOperator($sType)

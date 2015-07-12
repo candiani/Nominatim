@@ -54,7 +54,7 @@
 	function logEnd(&$oDB, $hLog, $iNumResults)
 	{
 		$aEndTime = explode('.',microtime(true));
-		if (!$aEndTime[1]) $aEndTime[1] = '0';
+		if (sizeof($aEndTime) < 2 || !$aEndTime[1]) $aEndTime[1] = '0';
 		$sEndTime = date('Y-m-d H:i:s',$aEndTime[0]).'.'.$aEndTime[1];
 
 		if (CONST_Log_DB)

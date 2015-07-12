@@ -89,7 +89,7 @@
 				{
 					foreach($aSearchWords as $aSearchTerm)
 					{
-						$aNewSearch = $aSearch;
+						$aNewSearch = clone $aSearch;
 						if ($aSearchTerm['country_code'])
 						{
 							$aNewSearch->setCountryCode($aSearchTerm['country_code']);
@@ -127,7 +127,7 @@
 				$aPhrases[sizeof($aPhrases)-1]['wordsets'] = getInverseWordSets($aFinalPhrase['words'], 0);
 			}
 
-			return $this->computeSearches($aSearches, $sPhrases, false);
+			return $this->computeSearches($aSearches, $aPhrases, false);
 		}
 
 		private function getWordSets($aWords, $iDepth)
@@ -248,7 +248,7 @@
 						$aData[0] = substr($aData[0],0,strlen($aData[1])-1).' '.substr($aData[0],strlen($aData[1])-1);
 						$aData[1] = substr($aData[1],0,-1).' '.substr($aData[1],-1,1);
 					}
-					$aGBPostcodeLocation = gbPostcodeCalculate($aData[0], $aData[1], $aData[2], $oDB);
+					$aGBPostcodeLocation = gbPostcodeCalculate($aData[0], $aData[1], $aData[2], $this->oDB);
 					if ($aGBPostcodeLocation)
 					{
 						$this->aTokens[$sToken] = $aGBPostcodeLocation;
@@ -305,7 +305,7 @@
 
 			   Score how good the search is so they can be ordered
 			 */
-			foreach($this->aPhrases as $iPhrase => $aPhrase)
+			foreach($aPhrases as $iPhrase => $aPhrase)
 			{
 				$aNewPhraseSearches = array();
 				if ($bStructuredPhrases) $sPhraseType = $this->aPhraseTypes[$iPhrase];
@@ -330,7 +330,7 @@
 							{
 								foreach($this->aTokens[' '.$sToken] as $aSearchTerm)
 								{
-									$aSearch = $aCurrentSearch;
+									$aSearch = clone $aCurrentSearch;
 									$aSearch->incSearchRank();
 									if (($sPhraseType == '' || $sPhraseType == 'country') && !empty($aSearchTerm['country_code']) && $aSearchTerm['country_code'] != '0')
 									{
@@ -339,7 +339,7 @@
 											$aSearch->setCountryCode($aSearchTerm['country_code']);
 											// Country is almost always at the end of the string - increase score for finding it anywhere else (optimisation)
 											if ($iToken+1 != sizeof($aWordset)
-											    || $iPhrase+1 != sizeof($this->aPhrases))
+											    || $iPhrase+1 != sizeof($aPhrases))
 											{
 												$aSearch->incSearchRank(5);
 											}
@@ -364,7 +364,7 @@
 											// If we already have a name try putting the postcode first
 											if ($aSearch->hasTokens(TokenType::Name))
 											{
-												$aNewSearch = $aSearch;
+												$aNewSearch = clone $aSearch;
 												$aNewSearch->addTokens(TokenType::Address, $aNewSearch->getTokens(TokenType::Name));
 												$aNewSearch->clearTokens(TokenType::Name);
 												$aNewSearch->addToken(TokenType::Name, $aSearchTerm['word_id']);
@@ -410,7 +410,7 @@
 										{
 											$aSearch->setClassType($aSearchTerm['class'],
 											                       $aSearchTerm['type']);
-											if (sizeof($aSearch['aName'])) $aSearch->setOperator('name');
+											if ($aSearch->hasTokens(TokenType::Name)) $aSearch->setOperator('name');
 											else $aSearch->setOperator('near'); // near = in for the moment
 											if ($aSearchTerm['operator'] == '') $aSearch->incSearchRank();
 
@@ -451,7 +451,7 @@
 									{
 										if ((!$bStructuredPhrases || $iPhrase > 0) && $aCurrentSearch->hasTokens(TokenType::Name) && strpos($sToken, ' ') === false)
 										{
-											$aSearch = $aCurrentSearch;
+											$aSearch = clone $aCurrentSearch;
 											$aSearch->incSearchRank();
 											if ($this->aWordFrequencyScores[$aSearchTerm['word_id']] < CONST_Max_Word_Frequency)
 											{
@@ -469,7 +469,7 @@
 															&& empty($aSearchTermToken['lat'])
 															&& empty($aSearchTermToken['class']))
 													{
-														$aSearch = $aCurrentSearch;
+														$aSearch = clone $aCurrentSearch;
 														$aSearch->incSearchRank();
 														$aSearch->addToken(TokenType::Address, $aSearchTermToken['word_id']);
 														if ($aSearch->isPlausible()) $aNewWordsetSearches[] = $aSearch;
@@ -484,11 +484,11 @@
 											}
 										}
 
-										if ($aCurrentSearch->hasTokens(TokenType::Name) || $aCurrentSearch->getNamePhrase() == $iPhrase)
+										if (!$aCurrentSearch->hasTokens(TokenType::Name) || $aCurrentSearch->getNamePhrase() == $iPhrase)
 										{
-											$aSearch = $aCurrentSearch;
+											$aSearch = clone $aCurrentSearch;
 											$aSearch->incSearchRank();
-											if ($aCurrentSearch->hasTokens(TokenType::Name)) $aSearch->incSearchRank();
+											if (!$aCurrentSearch->hasTokens(TokenType::Name)) $aSearch->incSearchRank();
 											if (preg_match('#^[0-9]+$#', $sToken)) $aSearch->incSearchRank(2);
 											if ($this->aWordFrequencyScores[$aSearchTerm['word_id']] < CONST_Max_Word_Frequency)
 												$aSearch->addToken(TokenType::Name, $aSearchTerm['word_id']);
