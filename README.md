@@ -1,7 +1,7 @@
 [![Build Status](https://github.com/osm-search/Nominatim/workflows/CI%20Tests/badge.svg)](https://github.com/osm-search/Nominatim/actions?query=workflow%3A%22CI+Tests%22)
 [![codecov](https://codecov.io/gh/osm-search/Nominatim/branch/master/graph/badge.svg?token=8P1LXrhCMy)](https://codecov.io/gh/osm-search/Nominatim)
 
-Nominatim
+Nominatim by Candiani
 =========
 
 Nominatim (from the Latin, 'by name') is a tool to search OpenStreetMap data
